@@ -1,0 +1,1265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Pantera 班表</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<!-- Firebase SDK (compat) -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<style>
+:root{
+  --bg:#ffffff;
+  --card:#f5f5f5;
+  --line:#e2e2e2;
+  --ink:#1a1a1a;
+  --text-dim:#888888;
+  --green:#a8e6c1;
+  --yellow:#f9e4a0;
+  --red:#f5a8a8;
+  --ease:cubic-bezier(0.32,0.72,0,1);
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;}
+body{
+  font-family:'Noto Sans SC',sans-serif;
+  background:var(--bg);
+  color:var(--ink);
+  overflow:hidden;
+  user-select:none;
+  -webkit-user-select:none;
+}
+input,textarea{
+  font-family:inherit;
+  user-select:text;
+  -webkit-user-select:text;
+}
+.screen{position:fixed;inset:0;display:none;flex-direction:column;background:var(--bg);}
+.screen.show{display:flex;}
+
+/* ===== buttons ===== */
+.btn{
+  display:inline-block;
+  border:none;border-radius:10px;
+  padding:12px 20px;
+  font-size:16px;font-weight:500;font-family:inherit;
+  background:var(--ink);color:#fff;
+  box-shadow:0 4px 10px rgba(0,0,0,.22),0 2px 0 #000;
+  cursor:pointer;
+  transition:transform .08s,box-shadow .08s,filter .08s;
+}
+.btn:active{
+  transform:translateY(2px);
+  box-shadow:0 1px 2px rgba(0,0,0,.18),0 0 0 #000;
+  filter:brightness(.75);
+}
+.btn.ghost{
+  background:var(--card);color:var(--ink);
+  box-shadow:0 4px 10px rgba(0,0,0,.12),0 2px 0 #d8d8d8;
+}
+.btn.ghost:active{box-shadow:0 1px 2px rgba(0,0,0,.1),0 0 0 #d8d8d8;filter:brightness(.92);}
+.btn.small{padding:6px 12px;font-size:13px;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,.18),0 1px 0 #000;}
+.btn.danger{background:#c0392b;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.18),0 1px 0 #8e2a1f;}
+.btn.danger:active{box-shadow:0 1px 2px rgba(0,0,0,.15),0 0 0 #8e2a1f;}
+
+/* ===== welcome ===== */
+#screen-welcome{align-items:center;justify-content:center;gap:14px;}
+#screen-welcome h1{
+  font-size:34px;font-weight:700;color:var(--ink);
+  letter-spacing:1px;margin-bottom:30px;text-align:center;
+}
+#screen-welcome .btn{width:230px;font-size:18px;padding:14px;}
+
+/* ===== modal ===== */
+.overlay{
+  position:fixed;inset:0;background:rgba(0,0,0,.4);
+  display:none;align-items:center;justify-content:center;z-index:50;
+}
+.overlay.show{display:flex;}
+.modal{
+  width:min(330px,90vw);
+  background:var(--card);
+  border:1px solid var(--line);
+  border-radius:16px;padding:22px;
+  box-shadow:0 10px 40px rgba(0,0,0,.25);
+}
+.modal h2{font-size:18px;color:var(--ink);margin-bottom:16px;}
+.field{margin-bottom:12px;position:relative;}
+.field label{display:block;font-size:12px;color:var(--text-dim);margin-bottom:4px;}
+.field input{
+  width:100%;padding:10px 12px;border-radius:8px;
+  border:1px solid #d5d5d5;background:#fff;color:var(--ink);
+  font-size:15px;outline:none;
+}
+.field input:focus{border-color:var(--ink);}
+.eye{
+  position:absolute;right:8px;bottom:5px;
+  width:34px;height:30px;border:none;background:none;
+  color:var(--text-dim);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+}
+.eye:active{color:var(--ink);}
+.modal .row{display:flex;gap:10px;margin-top:16px;}
+.modal .row .btn{flex:1;}
+.err{color:#c0392b;font-size:13px;min-height:18px;margin-top:6px;}
+.help-result{font-size:15px;line-height:1.8;color:var(--ink);margin-top:6px;}
+
+/* ===== banner ===== */
+#banner{
+  position:fixed;top:0;left:0;right:0;z-index:99;
+  background:var(--ink);color:#fff;
+  padding:12px 40px 12px 14px;font-size:14px;font-weight:500;
+  transform:translateY(-100%);transition:transform .25s var(--ease);
+}
+#banner.show{transform:none;}
+#banner button{
+  position:absolute;right:8px;top:50%;transform:translateY(-50%);
+  border:none;background:none;font-size:18px;cursor:pointer;color:#fff;
+}
+#mock-note{
+  position:fixed;bottom:2px;left:0;right:0;text-align:center;
+  font-size:9px;color:#bbb;z-index:5;pointer-events:none;display:none;
+}
+
+/* ===== calendar ===== */
+#cal-header{
+  display:flex;align-items:center;justify-content:flex-end;gap:8px;
+  padding:8px 12px 4px;
+}
+#cal-header .uname{font-size:14px;font-weight:700;color:var(--ink);margin-right:auto;}
+#month-nav{
+  display:flex;align-items:center;justify-content:center;gap:18px;
+  padding:2px 0 4px;
+}
+#month-nav button{
+  width:38px;height:30px;border:none;border-radius:8px;
+  background:var(--card);color:var(--ink);font-size:18px;cursor:pointer;
+  box-shadow:0 2px 6px rgba(0,0,0,.12),0 1px 0 #d8d8d8;
+}
+#month-nav button:active{transform:translateY(2px);box-shadow:none;filter:brightness(.9);}
+#month-nav button:disabled{opacity:.3;}
+#month-label{font-size:16px;font-weight:700;min-width:110px;text-align:center;}
+
+/* legend area */
+#cal-info{
+  display:flex;align-items:flex-start;justify-content:space-between;
+  padding:0 8px 4px;gap:8px;
+}
+#legend-left{display:flex;flex-direction:column;gap:4px;}
+#role-legend{
+  background:var(--green);border-radius:8px;
+  padding:4px 8px;
+  display:grid;grid-template-columns:repeat(5,auto);
+  column-gap:10px;row-gap:0;
+  font-size:9px;line-height:1.5;color:var(--ink);text-align:center;
+}
+#role-legend b{font-size:10px;font-weight:700;}
+#ban-legend{
+  background:var(--card);border:1px solid var(--line);border-radius:8px;
+  padding:3px 8px;font-size:9px;line-height:1.4;color:var(--ink);
+  white-space:nowrap;
+}
+#color-legend{
+  font-size:9px;color:var(--text-dim);line-height:1.7;text-align:right;flex-shrink:0;
+}
+#color-legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:3px;vertical-align:-1px;}
+
+#weekday-row{display:grid;grid-template-columns:repeat(7,1fr);padding:0 4px;}
+#weekday-row div{text-align:center;font-size:11px;color:var(--text-dim);padding:1px 0;}
+#weekday-row div:last-child{color:#d06060;}
+#cal-grid{
+  flex:1;display:grid;grid-template-columns:repeat(7,1fr);
+  grid-auto-rows:minmax(0,1fr);
+  gap:3px;padding:2px 4px 12px;min-height:0;
+}
+.day-cell{
+  background:var(--card);border-radius:6px;
+  display:flex;flex-direction:column;
+  padding:2px;min-height:0;overflow:hidden;
+}
+.day-cell .dnum{font-size:11px;color:var(--ink);line-height:1.3;text-align:center;font-weight:500;}
+.day-cell.today .dnum{font-weight:700;text-decoration:underline;}
+/* 前月・次月の日：白背景、班行なし */
+.day-cell.adj{background:#fff;}
+.day-cell.adj .dnum{color:#cccccc;font-weight:400;}
+/* 班行：A·B·C·D 同尺寸 + E/F 纵向二分，登记者名显示在对应格内 */
+.ban-row{
+  flex:1;margin-top:1px;border-radius:3px;
+  background:var(--red);
+  display:flex;gap:1px;padding:1px;
+  cursor:pointer;min-height:0;overflow:hidden;
+  touch-action:manipulation;
+  position:relative;
+}
+.ban-row .rc{
+  flex:1;min-width:0;border-radius:2px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:7px;line-height:1;font-weight:500;color:var(--ink);
+  white-space:nowrap;overflow:hidden;
+  font-style:normal;
+}
+.ban-row .rc.on{background:rgba(255,255,255,.6);}
+.ban-row .ef{flex:0.75;display:flex;flex-direction:column;gap:1px;min-width:0;}
+.ban-row .ef .rc{flex:1;font-size:6px;}
+.ban-row .memoflag{
+  position:absolute;top:0;right:0;
+  font-size:7px;line-height:1;font-style:normal;
+  pointer-events:none;
+}
+
+#fab-myshift{
+  position:fixed;right:14px;bottom:18px;z-index:20;
+  border:none;border-radius:24px;padding:12px 20px;
+  background:var(--ink);color:#fff;font-size:15px;font-weight:700;font-family:inherit;
+  box-shadow:0 5px 16px rgba(0,0,0,.3),0 2px 0 #000;cursor:pointer;
+  transition:transform .08s,box-shadow .08s,filter .08s;
+}
+#fab-myshift:active{transform:translateY(2px);box-shadow:0 1px 3px rgba(0,0,0,.2);filter:brightness(.75);}
+
+/* ===== sheets (bottom slide) ===== */
+.sheet{
+  position:fixed;left:0;right:0;bottom:0;z-index:60;
+  max-height:88vh;
+  background:var(--bg);
+  border-radius:18px 18px 0 0;
+  border-top:1px solid var(--line);
+  box-shadow:0 -8px 40px rgba(0,0,0,.25);
+  transform:translateY(105%);
+  transition:transform .2s var(--ease);
+  display:flex;flex-direction:column;
+}
+.sheet.open{transform:none;transition-duration:.25s;}
+.sheet-header{
+  padding:10px 16px 8px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:space-between;
+  touch-action:none;
+}
+.sheet-header h3{font-size:16px;color:var(--ink);}
+.sheet-grip{
+  position:absolute;top:6px;left:50%;transform:translateX(-50%);
+  width:44px;height:4px;border-radius:2px;background:#d0d0d0;
+}
+.sheet-close{
+  border:none;background:var(--card);color:var(--ink);
+  width:30px;height:30px;border-radius:50%;font-size:15px;cursor:pointer;
+}
+.sheet-body{overflow-y:auto;padding:4px 16px 24px;flex:1;}
+.sheet-backdrop{
+  position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:55;display:none;
+}
+.sheet-backdrop.show{display:block;}
+
+/* slot rows in shift sheet */
+.slot-row{
+  background:var(--card);border-radius:10px;
+  padding:10px 12px;margin-bottom:10px;
+  border:1px solid var(--line);
+}
+.slot-row.mine{border-color:var(--ink);}
+.slot-row .stitle{font-size:14px;font-weight:700;margin-bottom:8px;}
+.slot-row .stitle small{font-weight:400;color:var(--text-dim);margin-left:6px;}
+.role-grid{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:6px;
+}
+.role-btn{
+  border:none;border-radius:8px;padding:8px 2px;
+  font-size:12px;font-weight:500;font-family:inherit;cursor:pointer;
+  background:#fff;color:var(--ink);
+  border:1px solid #d5d5d5;
+  box-shadow:0 3px 7px rgba(0,0,0,.12),0 2px 0 #d8d8d8;
+  transition:transform .1s,box-shadow .1s,filter .1s;
+  line-height:1.3;
+  overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
+}
+.role-btn small{display:block;font-size:10px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;}
+.role-btn.mine{
+  background:var(--ink);color:#fff;border-color:var(--ink);
+  transform:translateY(2px);
+  box-shadow:inset 0 2px 5px rgba(0,0,0,.5),0 0 0 #000;
+  filter:brightness(.92);
+}
+.role-btn.mine small{color:#ccc;}
+.role-btn.taken{
+  background:var(--line);color:var(--text-dim);border-color:var(--line);
+  box-shadow:none;cursor:default;
+}
+.role-btn:active{transform:translateY(2px);box-shadow:0 1px 2px rgba(0,0,0,.1),0 0 0 #d8d8d8;filter:brightness(.85);}
+.role-btn.taken:active{transform:none;filter:none;}
+.slot-row .memo{
+  width:100%;margin-top:8px;padding:6px 10px;
+  border-radius:6px;border:1px solid #d5d5d5;
+  background:#fff;color:var(--ink);font-size:13px;outline:none;
+}
+
+/* detail */
+.detail-sec{margin-bottom:10px;}
+.detail-sec h4{font-size:13px;color:var(--text-dim);margin-bottom:6px;}
+.detail-sec .name-row{
+  display:flex;align-items:center;justify-content:space-between;
+  background:var(--card);border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:14px;
+}
+.detail-sec .name-row .nm{flex:1;}
+.detail-sec .none{color:var(--text-dim);}
+.detail-memo{font-size:13px;color:var(--ink);white-space:pre-wrap;background:var(--card);border-radius:8px;padding:9px 12px;}
+
+/* my shift */
+.ms-row{
+  display:flex;align-items:center;gap:10px;
+  background:var(--card);border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:14px;
+}
+.ms-row .d{font-weight:700;min-width:44px;}
+.ms-row .t{flex:1;}
+.ms-row .r{color:var(--text-dim);}
+
+/* admin */
+.adm-sec{margin-bottom:22px;}
+.adm-sec h4{font-size:14px;color:var(--ink);font-weight:700;margin-bottom:10px;border-bottom:1px solid var(--line);padding-bottom:5px;}
+.adm-slot{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+.adm-slot span{font-size:13px;color:var(--text-dim);width:32px;font-weight:700;}
+.adm-slot input{
+  flex:1;padding:8px 10px;border-radius:6px;border:1px solid #d5d5d5;
+  background:#fff;color:var(--ink);font-size:14px;outline:none;
+}
+.adm-user{display:flex;align-items:center;gap:8px;background:var(--card);border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:13px;}
+.adm-user .ui{flex:1;}
+.adm-user .ui b{font-size:14px;}
+.adm-user .ui small{color:var(--text-dim);display:block;}
+.adm-add{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;}
+.adm-add input{padding:8px 10px;border-radius:6px;border:1px solid #d5d5d5;background:#fff;color:var(--ink);font-size:13px;outline:none;}
+.adm-shift-row{display:flex;align-items:center;gap:8px;background:var(--card);border-radius:8px;padding:7px 12px;margin-bottom:5px;font-size:13px;}
+.adm-shift-row .flex1{flex:1;}
+
+/* memo modal textarea */
+#memo-big{
+  width:100%;height:160px;padding:10px 12px;border-radius:8px;
+  border:1px solid #d5d5d5;background:#fff;color:var(--ink);
+  font-size:15px;outline:none;resize:none;
+}
+.muted{color:var(--text-dim);font-size:13px;}
+#modal-dup .modal{text-align:center;}
+#modal-dup p{font-size:15px;margin:6px 0 4px;}
+</style>
+</head>
+<body>
+
+<!-- notification banner -->
+<div id="banner"><span id="banner-text"></span><button onclick="hideBanner()">✕</button></div>
+<div id="mock-note">演示模式：尚未配置 Firebase，数据仅保存在本机浏览器中</div>
+
+<!-- ===== ① welcome ===== -->
+<div id="screen-welcome" class="screen show">
+  <h1>Welcome to Pantera</h1>
+  <button class="btn" onclick="openModal('modal-register')">注册</button>
+  <button class="btn" onclick="openModal('modal-login')">登录</button>
+  <button class="btn ghost" onclick="openModal('modal-help')">Help</button>
+</div>
+
+<!-- register modal -->
+<div class="overlay" id="modal-register">
+  <div class="modal">
+    <h2>注册新账号</h2>
+    <div class="field"><label>ID（字母/数字/_/-）</label><input id="reg-id" autocomplete="off"></div>
+    <div class="field"><label>姓名</label><input id="reg-name" autocomplete="off"></div>
+    <div class="field"><label>密码</label><input id="reg-pw" type="password" autocomplete="new-password">
+      <button class="eye" data-eye="reg-pw"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/></svg></button></div>
+    <div class="field"><label>出生日期（yyyymmdd）</label><input id="reg-birth" inputmode="numeric" maxlength="8" autocomplete="off"></div>
+    <div class="err" id="reg-err"></div>
+    <div class="row">
+      <button class="btn ghost" onclick="closeModal('modal-register')">取消</button>
+      <button class="btn" onclick="doRegister()">注册</button>
+    </div>
+  </div>
+</div>
+
+<!-- login modal -->
+<div class="overlay" id="modal-login">
+  <div class="modal">
+    <h2>登录</h2>
+    <div class="field"><label>ID</label><input id="login-id" autocomplete="off"></div>
+    <div class="field"><label>密码</label><input id="login-pw" type="password">
+      <button class="eye" data-eye="login-pw"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.6"/></svg></button></div>
+    <div class="err" id="login-err"></div>
+    <div class="row">
+      <button class="btn ghost" onclick="closeModal('modal-login')">取消</button>
+      <button class="btn" onclick="doLogin()">登录</button>
+    </div>
+  </div>
+</div>
+
+<!-- help modal -->
+<div class="overlay" id="modal-help">
+  <div class="modal">
+    <h2>找回账号</h2>
+    <p class="muted" style="margin-bottom:10px;">请输入注册时填写的出生日期</p>
+    <div class="field"><label>出生日期（yyyymmdd）</label><input id="help-birth" inputmode="numeric" maxlength="8"></div>
+    <div class="err" id="help-err"></div>
+    <div class="help-result" id="help-result"></div>
+    <div class="row">
+      <button class="btn ghost" onclick="closeModal('modal-help')">关闭</button>
+      <button class="btn" onclick="doHelp()">查询</button>
+    </div>
+  </div>
+</div>
+
+<!-- duplicate warning modal -->
+<div class="overlay" id="modal-dup" style="z-index:90;">
+  <div class="modal">
+    <h2>⚠️ 重复登记</h2>
+    <p>排班表有重复，请重新选择。</p>
+    <div class="row">
+      <button class="btn" onclick="closeModal('modal-dup')">确定</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== ② calendar ===== -->
+<div id="screen-calendar" class="screen">
+  <div id="cal-header">
+    <span class="uname" id="cal-uname"></span>
+    <button class="btn small ghost" id="btn-admin" style="display:none" onclick="openAdmin()">⚙ 管理</button>
+    <button class="btn small ghost" onclick="doLogout()">退出</button>
+  </div>
+  <div id="month-nav">
+    <button id="nav-prev" onclick="navMonth(-1)">‹</button>
+    <span id="month-label"></span>
+    <button onclick="navMonth(1)">›</button>
+  </div>
+  <div id="cal-info">
+    <div id="legend-left">
+      <div id="role-legend">
+        <b>A</b><b>B</b><b>C</b><b>D</b><b>E/F</b>
+        <span>直播1</span><span>直播2</span><span>中控1</span><span>中控2</span><span>待机</span>
+      </div>
+      <div id="ban-legend"></div>
+    </div>
+    <div id="color-legend">
+      <div><i style="background:var(--green)"></i>直播·中控已齐</div>
+      <div><i style="background:var(--yellow)"></i>缺一方</div>
+      <div><i style="background:var(--red)"></i>无人</div>
+    </div>
+  </div>
+  <div id="weekday-row">
+    <div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div><div>日</div>
+  </div>
+  <div id="cal-grid"></div>
+  <button id="fab-myshift" onclick="openMyShift()">我的班表</button>
+</div>
+
+<!-- backdrop for sheets -->
+<div class="sheet-backdrop" id="sheet-backdrop" onclick="closeAllSheets()"></div>
+
+<!-- ===== ③ shift input sheet ===== -->
+<div class="sheet" id="sheet-shift">
+  <div class="sheet-header" data-swipe="sheet-shift">
+    <div class="sheet-grip"></div>
+    <h3 id="shift-title"></h3>
+    <button class="sheet-close" onclick="closeSheet('sheet-shift')">✕</button>
+  </div>
+  <div class="sheet-body">
+    <div id="shift-rows"></div>
+    <p class="muted" style="text-align:center;">点击角色按钮登记 / 再次点击取消　·　长按备注栏可放大编辑</p>
+  </div>
+</div>
+
+<!-- ===== ④ slot detail sheet ===== -->
+<div class="sheet" id="sheet-detail">
+  <div class="sheet-header" data-swipe="sheet-detail">
+    <div class="sheet-grip"></div>
+    <h3 id="detail-title"></h3>
+    <button class="sheet-close" onclick="closeSheet('sheet-detail')">✕</button>
+  </div>
+  <div class="sheet-body" id="detail-body"></div>
+</div>
+
+<!-- ===== ⑤ my shift sheet ===== -->
+<div class="sheet" id="sheet-myshift">
+  <div class="sheet-header" data-swipe="sheet-myshift">
+    <div class="sheet-grip"></div>
+    <h3 id="myshift-title">我的班表</h3>
+    <button class="sheet-close" onclick="closeSheet('sheet-myshift')">✕</button>
+  </div>
+  <div class="sheet-body" id="myshift-body"></div>
+</div>
+
+<!-- ===== admin panel ===== -->
+<div class="sheet" id="sheet-admin" style="max-height:92vh;">
+  <div class="sheet-header" data-swipe="sheet-admin">
+    <div class="sheet-grip"></div>
+    <h3>管理面板</h3>
+    <button class="sheet-close" onclick="closeSheet('sheet-admin')">✕</button>
+  </div>
+  <div class="sheet-body">
+    <div class="adm-sec">
+      <h4>班次时间设置</h4>
+      <div id="adm-slots"></div>
+      <button class="btn small" onclick="saveSlots()">保存班次时间</button>
+      <span class="muted" id="adm-slots-msg"></span>
+    </div>
+    <div class="adm-sec">
+      <h4>员工管理</h4>
+      <div id="adm-users"></div>
+      <div class="adm-add">
+        <input id="au-id" placeholder="ID">
+        <input id="au-name" placeholder="姓名">
+        <input id="au-pw" placeholder="密码">
+        <input id="au-birth" placeholder="生日 yyyymmdd" inputmode="numeric" maxlength="8">
+      </div>
+      <button class="btn small" style="margin-top:8px;" onclick="adminAddUser()">添加员工</button>
+      <span class="err" id="adm-user-err" style="display:inline-block;"></span>
+    </div>
+    <div class="adm-sec">
+      <h4>本月班表总览（<span id="adm-month-label"></span>）</h4>
+      <div id="adm-shifts"></div>
+    </div>
+  </div>
+</div>
+
+<!-- memo expand modal -->
+<div class="overlay" id="modal-memo" style="z-index:80;">
+  <div class="modal">
+    <h2 id="memo-title">备注编辑</h2>
+    <textarea id="memo-big"></textarea>
+    <div class="row">
+      <button class="btn ghost" onclick="closeModal('modal-memo')">取消</button>
+      <button class="btn" onclick="saveMemoBig()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   Firebase 配置
+   ------------------------------------------------------------
+   ★ 只需修改下面这一行：
+     把 databaseURL 换成你自己的 Firebase Realtime Database 地址
+     （形如 https://xxxx-default-rtdb.firebaseio.com）
+     改完后部署到任意静态托管（Netlify / GitHub Pages 等），
+     把网址发给大家，所有人就能实时共享同一份班表。
+   未填写时为演示模式（数据只保存在本机浏览器）。
+   ============================================================ */
+const firebaseConfig = {
+  databaseURL: "https://pantera-paibanbiao-default-rtdb.asia-southeast1.firebasedatabase.app"
+};
+
+/* 主管理账号（不存入 Firebase） */
+const MASTER_ID = "pantera", MASTER_PW = "1205";
+
+/* 班次：1班〜5班（master 可在管理面板修改时间） */
+const DEFAULT_SLOTS = {
+  s1:{order:1,time:"10:00〜12:00"},
+  s2:{order:2,time:"15:00〜17:00"},
+  s3:{order:3,time:"17:00〜19:00"},
+  s4:{order:4,time:"20:00〜23:30"},
+  s5:{order:5,time:"25:00〜27:00"}
+};
+const CIRCLED = ["①","②","③","④","⑤","⑥","⑦","⑧","⑨"];
+const banName = s => `${s.order}班`;
+const banLabel = s => `${s.order}班 ${s.time}`;
+
+/* 角色定义：A〜F，各角色上限1人
+   G = A+B（直播组） H = C+D（中控组） I = E+F（待机组） */
+const ROLES = [
+  { key:'A', label:'直播1', group:'G' },
+  { key:'B', label:'直播2', group:'G' },
+  { key:'C', label:'中控1', group:'H' },
+  { key:'D', label:'中控2', group:'H' },
+  { key:'E', label:'待机1', group:'I' },
+  { key:'F', label:'待机2', group:'I' }
+];
+const ROLE_LABEL = Object.fromEntries(ROLES.map(r => [r.key, r.label]));
+
+/* ============================================================
+   DB 抽象层：已配置 Firebase 时走 Realtime Database，
+   占位配置时退回本机 localStorage 演示模式
+   ============================================================ */
+const USE_MOCK = !firebaseConfig.databaseURL || /YOUR_/.test(firebaseConfig.databaseURL);
+let DB;
+if (USE_MOCK) {
+  document.getElementById('mock-note').style.display = 'block';
+  const store = { data: {}, watchers: [] };
+  const load = () => { try { store.data = JSON.parse(localStorage.getItem('pantera_db') || '{}'); } catch (e) { store.data = {}; } };
+  load();
+  const parts = p => p.split('/').filter(Boolean);
+  const getAt = p => { let c = store.data; for (const k of parts(p)) { if (c == null || typeof c !== 'object') return null; c = c[k]; } return c === undefined ? null : c; };
+  const notifyAll = () => store.watchers.forEach(w => w.cb(JSON.parse(JSON.stringify(getAt(w.path)))));
+  const setAt = (p, v) => {
+    load(); /* 写入前重新读取，避免多标签页互相覆盖 */
+    const ps = parts(p); let c = store.data;
+    for (let i = 0; i < ps.length - 1; i++) { if (typeof c[ps[i]] !== 'object' || c[ps[i]] == null) c[ps[i]] = {}; c = c[ps[i]]; }
+    if (v == null) delete c[ps[ps.length - 1]]; else c[ps[ps.length - 1]] = v;
+    localStorage.setItem('pantera_db', JSON.stringify(store.data));
+    notifyAll();
+  };
+  /* 其他标签页的写入也实时反映（模拟 Firebase 实时同步） */
+  window.addEventListener('storage', e => {
+    if (e.key === 'pantera_db') { load(); notifyAll(); }
+  });
+  DB = {
+    get: async p => { load(); return JSON.parse(JSON.stringify(getAt(p))); },
+    set: async (p, v) => setAt(p, v),
+    remove: async p => setAt(p, null),
+    watch: (p, cb) => {
+      const w = { path: p, cb };
+      store.watchers.push(w);
+      setTimeout(() => cb(JSON.parse(JSON.stringify(getAt(p)))), 0);
+      return () => { const i = store.watchers.indexOf(w); if (i >= 0) store.watchers.splice(i, 1); };
+    }
+  };
+} else {
+  firebase.initializeApp(firebaseConfig);
+  const fdb = firebase.database();
+  DB = {
+    get: p => fdb.ref(p).once('value').then(s => s.val()),
+    set: (p, v) => fdb.ref(p).set(v),
+    remove: p => fdb.ref(p).remove(),
+    watch: (p, cb) => { const ref = fdb.ref(p); const h = ref.on('value', s => cb(s.val())); return () => ref.off('value', h); }
+  };
+}
+
+/* ============================================================
+   全局状态
+   ============================================================ */
+let currentUser = null;            // {id, name, isMaster}
+let viewYear = 2026, viewMonth = 1;
+let monthData = {};                // /shifts/{y}/{m} 的内容
+let slots = JSON.parse(JSON.stringify(DEFAULT_SLOTS));
+let unsubMonth = null, unsubSlots = null;
+let sheetDay = null;               // 班表登记面板对应的日
+let detailCtx = null;              // {day, slotId}
+let memoCtx = null;                // {day, slotId}
+
+const $ = id => document.getElementById(id);
+function entriesOf(x) {
+  if (!x) return [];
+  if (Array.isArray(x)) return x.map((v, i) => [String(i), v]).filter(([, v]) => v != null);
+  return Object.entries(x).filter(([, v]) => v != null);
+}
+function slotList() {
+  return entriesOf(slots).sort((a, b) => (a[1].order || 0) - (b[1].order || 0));
+}
+function getDayData(day) {
+  if (!monthData) return null;
+  if (Array.isArray(monthData)) return monthData[day] || null;
+  return monthData[day] || monthData[String(day)] || null;
+}
+function getSlotData(day, slotId) {
+  const d = getDayData(day);
+  return (d && d[slotId]) || null;
+}
+/* 某角色的占用者 {id,name} 或 null */
+function roleHolder(day, slotId, roleKey) {
+  const s = getSlotData(day, slotId);
+  const v = s && s[roleKey];
+  return (v && v.id) ? v : null;
+}
+const monthPath = () => `shifts/${viewYear}/${viewMonth}`;
+
+/* ============================================================
+   模态框 / 密码眼睛
+   ============================================================ */
+function openModal(id) { $(id).classList.add('show'); }
+function closeModal(id) { $(id).classList.remove('show'); }
+
+document.querySelectorAll('.eye').forEach(btn => {
+  const input = $(btn.dataset.eye);
+  const show = e => { e.preventDefault(); input.type = 'text'; };
+  const hide = () => { input.type = 'password'; };
+  btn.addEventListener('mousedown', show);
+  btn.addEventListener('touchstart', show, { passive: false });
+  ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(ev => btn.addEventListener(ev, hide));
+  btn.addEventListener('click', e => e.preventDefault());
+});
+
+/* ============================================================
+   通知横幅
+   ============================================================ */
+function showBanner(text) {
+  $('banner-text').textContent = text;
+  $('banner').classList.add('show');
+  setTimeout(hideBanner, 6000);
+}
+function hideBanner() { $('banner').classList.remove('show'); }
+
+/* ============================================================
+   注册 / 登录 / Help
+   ============================================================ */
+async function doRegister() {
+  const id = $('reg-id').value.trim();
+  const name = $('reg-name').value.trim();
+  const pw = $('reg-pw').value;
+  const birth = $('reg-birth').value.trim();
+  const err = $('reg-err');
+  err.textContent = '';
+  if (!id || !name || !pw || !birth) { err.textContent = '请填写所有项目'; return; }
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) { err.textContent = 'ID只能包含字母、数字、_、-'; return; }
+  if (id === MASTER_ID) { err.textContent = '该ID不可使用'; return; }
+  if (!/^\d{8}$/.test(birth)) { err.textContent = '出生日期格式应为 yyyymmdd'; return; }
+  const exists = await DB.get(`users/${id}`);
+  if (exists) { err.textContent = '该ID已被注册'; return; }
+  await DB.set(`users/${id}`, { id, name, password: pw, birth, createdAt: Date.now() });
+  closeModal('modal-register');
+  enterApp({ id, name, isMaster: false });
+}
+
+async function doLogin() {
+  const id = $('login-id').value.trim();
+  const pw = $('login-pw').value;
+  const err = $('login-err');
+  err.textContent = '';
+  if (!id || !pw) { err.textContent = '请输入ID和密码'; return; }
+  if (id === MASTER_ID && pw === MASTER_PW) {
+    closeModal('modal-login');
+    enterApp({ id: MASTER_ID, name: '管理员', isMaster: true });
+    return;
+  }
+  const u = await DB.get(`users/${id}`);
+  if (!u || u.password !== pw) { err.textContent = 'ID或密码错误'; return; }
+  closeModal('modal-login');
+  enterApp({ id: u.id, name: u.name, isMaster: false });
+}
+
+async function doHelp() {
+  const birth = $('help-birth').value.trim();
+  const err = $('help-err'), res = $('help-result');
+  err.textContent = ''; res.textContent = '';
+  if (!/^\d{8}$/.test(birth)) { err.textContent = '出生日期格式应为 yyyymmdd'; return; }
+  const users = await DB.get('users');
+  const hits = entriesOf(users).filter(([, u]) => u.birth === birth);
+  if (!hits.length) { err.textContent = '未找到匹配的账号'; return; }
+  res.innerHTML = hits.map(([, u]) =>
+    `ID：<b>${esc(u.id)}</b>　姓名：${esc(u.name)}`).join('<br>');
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/* ============================================================
+   进入 / 退出主界面
+   ============================================================ */
+async function enterApp(user) {
+  currentUser = user;
+  sessionStorage.setItem('pantera_user', JSON.stringify(user));
+  $('cal-uname').textContent = user.isMaster ? '👑 ' + user.name : user.name;
+  $('btn-admin').style.display = user.isMaster ? '' : 'none';
+  $('screen-welcome').classList.remove('show');
+  $('screen-calendar').classList.add('show');
+
+  const now = new Date();
+  viewYear = Math.max(now.getFullYear(), 2026);
+  viewMonth = now.getFullYear() >= 2026 ? now.getMonth() + 1 : 1;
+
+  if (unsubSlots) unsubSlots();
+  unsubSlots = DB.watch('slots', val => {
+    slots = val || JSON.parse(JSON.stringify(DEFAULT_SLOTS));
+    renderBanLegend(); renderCalendar(); refreshOpenViews();
+  });
+  subscribeMonth();
+
+  if (!user.isMaster) {
+    const n = await DB.get(`notifications/${user.id}`);
+    if (n) {
+      showBanner('您的班表已被管理员修改');
+      DB.remove(`notifications/${user.id}`);
+    }
+  }
+}
+
+function doLogout() {
+  sessionStorage.removeItem('pantera_user');
+  if (unsubMonth) { unsubMonth(); unsubMonth = null; }
+  if (unsubSlots) { unsubSlots(); unsubSlots = null; }
+  currentUser = null;
+  closeAllSheets();
+  $('screen-calendar').classList.remove('show');
+  $('screen-welcome').classList.add('show');
+}
+
+/* ============================================================
+   月历
+   ============================================================ */
+function subscribeMonth() {
+  if (unsubMonth) unsubMonth();
+  unsubMonth = DB.watch(monthPath(), val => {
+    monthData = val || {};
+    renderCalendar(); refreshOpenViews();
+  });
+}
+
+function navMonth(d) {
+  let y = viewYear, m = viewMonth + d;
+  if (m < 1) { m = 12; y--; }
+  if (m > 12) { m = 1; y++; }
+  if (y < 2026) return;
+  viewYear = y; viewMonth = m;
+  closeAllSheets();
+  subscribeMonth();
+  renderCalendar();
+}
+
+/* 班次时间对应表（凡例下方） */
+function renderBanLegend() {
+  $('ban-legend').innerHTML = slotList()
+    .map(([, s]) => `<div>${CIRCLED[s.order - 1] || s.order}${esc(s.time)}</div>`).join('');
+}
+
+/* 颜色逻辑：G=A+B  H=C+D  I=E+F
+   两组以上有人→绿 / 仅一组有人→黄 / 全空→红 */
+function banRowColor(day, slotId) {
+  const s = getSlotData(day, slotId);
+  const has = k => (s && s[k] && s[k].id) ? 1 : 0;
+  const G = has('A') + has('B'), H = has('C') + has('D'), I = has('E') + has('F');
+  const groups = (G > 0 ? 1 : 0) + (H > 0 ? 1 : 0) + (I > 0 ? 1 : 0);
+  if (groups >= 2) return 'var(--green)';
+  if (groups === 1) return 'var(--yellow)';
+  return 'var(--red)';
+}
+
+function renderCalendar() {
+  $('month-label').textContent = `${viewYear}年${viewMonth}月`;
+  $('nav-prev').disabled = (viewYear === 2026 && viewMonth === 1);
+  const grid = $('cal-grid');
+  grid.innerHTML = '';
+  /* 周一开始 */
+  const first = (new Date(viewYear, viewMonth - 1, 1).getDay() + 6) % 7;
+  const days = new Date(viewYear, viewMonth, 0).getDate();
+  const today = new Date();
+  const isThisMonth = today.getFullYear() === viewYear && today.getMonth() + 1 === viewMonth;
+  const sl = slotList();
+
+  /* 前月末尾の日（白背景・班行なし） */
+  const adjCell = num => {
+    const c = document.createElement('div');
+    c.className = 'day-cell adj';
+    const dn = document.createElement('div');
+    dn.className = 'dnum'; dn.textContent = num;
+    c.appendChild(dn);
+    return c;
+  };
+  const prevDays = new Date(viewYear, viewMonth - 1, 0).getDate();
+  for (let i = 0; i < first; i++) {
+    grid.appendChild(adjCell(prevDays - first + 1 + i));
+  }
+  for (let day = 1; day <= days; day++) {
+    const cell = document.createElement('div');
+    cell.className = 'day-cell' + (isThisMonth && today.getDate() === day ? ' today' : '');
+    const dn = document.createElement('div');
+    dn.className = 'dnum'; dn.textContent = day;
+    cell.appendChild(dn);
+    sl.forEach(([slotId]) => {
+      const row = document.createElement('div');
+      row.className = 'ban-row';
+      row.style.background = banRowColor(day, slotId);
+      /* A·B·C·D 四格 + E/F 纵向二分格，名字显示在对应格内 */
+      const slot = getSlotData(day, slotId);
+      const holderOf = k => (slot && slot[k] && slot[k].id) ? slot[k] : null;
+      const roleCell = k => {
+        const c = document.createElement('i');
+        const h = holderOf(k);
+        c.className = 'rc' + (h ? ' on' : '');
+        /* 格子太窄，只显示名字首字；全名可长按查看详情 */
+        if (h) c.textContent = Array.from(h.name)[0] || '';
+        return c;
+      };
+      ['A', 'B', 'C', 'D'].forEach(k => row.appendChild(roleCell(k)));
+      const ef = document.createElement('span');
+      ef.className = 'ef';
+      ['E', 'F'].forEach(k => ef.appendChild(roleCell(k)));
+      row.appendChild(ef);
+      if (slot && slot.memo) {
+        const flag = document.createElement('i');
+        flag.className = 'memoflag';
+        flag.textContent = '❗️';
+        row.appendChild(flag);
+      }
+      addPress(row,
+        () => openShiftSheet(day),
+        () => openDetail(day, slotId));
+      cell.appendChild(row);
+    });
+    /* 点日期数字等空白处也打开登记面板 */
+    cell.addEventListener('click', e => {
+      if (e.target === cell || e.target.classList.contains('dnum')) openShiftSheet(day);
+    });
+    grid.appendChild(cell);
+  }
+  /* 次月头几日（白背景・班行なし） */
+  const trail = (7 - (first + days) % 7) % 7;
+  for (let i = 1; i <= trail; i++) {
+    grid.appendChild(adjCell(i));
+  }
+}
+
+/* tap / longpress 判定 */
+function addPress(el, onTap, onLong) {
+  let timer = null, fired = false;
+  el.addEventListener('pointerdown', e => {
+    fired = false;
+    timer = setTimeout(() => { fired = true; onLong(); }, 550);
+  });
+  el.addEventListener('pointerup', () => {
+    clearTimeout(timer);
+    if (!fired) onTap();
+  });
+  el.addEventListener('pointerleave', () => clearTimeout(timer));
+  el.addEventListener('pointercancel', () => clearTimeout(timer));
+  el.addEventListener('contextmenu', e => e.preventDefault());
+}
+
+/* ============================================================
+   面板（sheet）开关 + 下滑关闭
+   ============================================================ */
+function openSheet(id) {
+  $('sheet-backdrop').classList.add('show');
+  $(id).classList.add('open');
+}
+function closeSheet(id) {
+  $(id).classList.remove('open');
+  if (id === 'sheet-shift') sheetDay = null;
+  if (id === 'sheet-detail') detailCtx = null;
+  if (!document.querySelector('.sheet.open')) $('sheet-backdrop').classList.remove('show');
+}
+function closeAllSheets() {
+  document.querySelectorAll('.sheet.open').forEach(s => s.classList.remove('open'));
+  $('sheet-backdrop').classList.remove('show');
+  sheetDay = null; detailCtx = null;
+}
+/* 头部下滑手势关闭 */
+document.querySelectorAll('[data-swipe]').forEach(h => {
+  let startY = null;
+  const sheet = $(h.dataset.swipe);
+  h.addEventListener('touchstart', e => { startY = e.touches[0].clientY; }, { passive: true });
+  h.addEventListener('touchmove', e => {
+    if (startY == null) return;
+    const dy = e.touches[0].clientY - startY;
+    if (dy > 0) sheet.style.transform = `translateY(${dy}px)`;
+  }, { passive: true });
+  h.addEventListener('touchend', e => {
+    const dy = e.changedTouches[0].clientY - (startY ?? 0);
+    sheet.style.transform = '';
+    if (dy > 80) closeSheet(h.dataset.swipe);
+    startY = null;
+  });
+});
+
+function refreshOpenViews() {
+  if (sheetDay != null && $('sheet-shift').classList.contains('open')) renderShiftRows();
+  if (detailCtx && $('sheet-detail').classList.contains('open')) renderDetail();
+  if ($('sheet-myshift').classList.contains('open')) renderMyShift();
+  if ($('sheet-admin').classList.contains('open')) { renderAdminUsers(); renderAdminShifts(); }
+}
+
+/* ============================================================
+   ③ 班表登记面板
+   ============================================================ */
+function openShiftSheet(day) {
+  sheetDay = day;
+  $('shift-title').textContent = `${viewMonth}月${day}日 班表登记`;
+  renderShiftRows();
+  openSheet('sheet-shift');
+}
+
+function renderShiftRows() {
+  const wrap = $('shift-rows');
+  /* 输入中的备注栏保护：记住焦点再恢复 */
+  let focusSlot = null, focusVal = null, selStart = 0;
+  const ae = document.activeElement;
+  if (ae && ae.classList && ae.classList.contains('memo')) {
+    focusSlot = ae.dataset.slot; focusVal = ae.value; selStart = ae.selectionStart;
+  }
+  wrap.innerHTML = '';
+  slotList().forEach(([slotId, s]) => {
+    const slot = getSlotData(sheetDay, slotId) || {};
+    const mineAny = ROLES.some(r => slot[r.key] && slot[r.key].id === currentUser.id);
+
+    const row = document.createElement('div');
+    row.className = 'slot-row' + (mineAny ? ' mine' : '');
+
+    const title = document.createElement('div');
+    title.className = 'stitle';
+    title.innerHTML = `${banName(s)}<small>${esc(s.time)}</small>`;
+    row.appendChild(title);
+
+    const grid = document.createElement('div');
+    grid.className = 'role-grid';
+    ROLES.forEach(r => {
+      const holder = slot[r.key] && slot[r.key].id ? slot[r.key] : null;
+      const btn = document.createElement('button');
+      const mine = holder && holder.id === currentUser.id;
+      btn.className = 'role-btn' + (mine ? ' mine' : holder ? ' taken' : '');
+      btn.innerHTML = `${r.label}<small>${holder ? esc(holder.name) : '－'}</small>`;
+      btn.addEventListener('click', () => toggleRole(sheetDay, slotId, r.key));
+      grid.appendChild(btn);
+    });
+    row.appendChild(grid);
+
+    const memo = document.createElement('input');
+    memo.className = 'memo';
+    memo.dataset.slot = slotId;
+    memo.placeholder = '备注…（长按放大）';
+    memo.value = slot.memo || '';
+    memo.addEventListener('change', () => saveMemo(sheetDay, slotId, memo.value));
+    addPress(memo, () => {}, () => openMemoModal(sheetDay, slotId, memo.value));
+    row.appendChild(memo);
+
+    wrap.appendChild(row);
+    if (focusSlot === slotId) {
+      memo.value = focusVal;
+      memo.focus();
+      try { memo.setSelectionRange(selStart, selStart); } catch (e) {}
+    }
+  });
+}
+
+/* 登记/取消：每个角色上限1人；同班内重复登记时警告 */
+async function toggleRole(day, slotId, roleKey) {
+  const holder = roleHolder(day, slotId, roleKey);
+  const path = `${monthPath()}/${day}/${slotId}/${roleKey}`;
+  if (holder && holder.id === currentUser.id) {
+    await DB.remove(path);
+    return;
+  }
+  if (holder) return; /* 已被他人占用 */
+  /* 重复检查：同一班内 A〜F 是否已有自己 */
+  const slot = getSlotData(day, slotId) || {};
+  const dup = ROLES.some(r => r.key !== roleKey && slot[r.key] && slot[r.key].id === currentUser.id);
+  if (dup) { openModal('modal-dup'); return; }
+  await DB.set(path, { id: currentUser.id, name: currentUser.name });
+}
+
+/* ===== 备注 ===== */
+function saveMemo(day, slotId, text) {
+  const path = `${monthPath()}/${day}/${slotId}/memo`;
+  if (text.trim() === '') DB.remove(path); else DB.set(path, text);
+}
+function openMemoModal(day, slotId, current) {
+  memoCtx = { day, slotId };
+  const s = slots[slotId];
+  $('memo-title').textContent = `备注 · ${viewMonth}月${day}日 ${s ? banLabel(s) : ''}`;
+  $('memo-big').value = current || '';
+  openModal('modal-memo');
+  setTimeout(() => $('memo-big').focus(), 100);
+}
+function saveMemoBig() {
+  if (memoCtx) saveMemo(memoCtx.day, memoCtx.slotId, $('memo-big').value);
+  closeModal('modal-memo');
+  memoCtx = null;
+}
+
+/* ============================================================
+   ④ 班次详情（长按）
+   ============================================================ */
+function openDetail(day, slotId) {
+  detailCtx = { day, slotId };
+  renderDetail();
+  openSheet('sheet-detail');
+}
+
+function renderDetail() {
+  if (!detailCtx) return;
+  const { day, slotId } = detailCtx;
+  const s = slots[slotId] || {};
+  $('detail-title').textContent = `${viewMonth}月${day}日　${s.order ? banLabel(s) : ''}`;
+  const slot = getSlotData(day, slotId) || {};
+  const body = $('detail-body');
+  body.innerHTML = '';
+
+  ROLES.forEach(r => {
+    const holder = slot[r.key] && slot[r.key].id ? slot[r.key] : null;
+    const sec = document.createElement('div');
+    sec.className = 'detail-sec';
+    const rrow = document.createElement('div');
+    rrow.className = 'name-row';
+    rrow.innerHTML = `<span class="nm"><b>${r.label}</b>　${holder ? esc(holder.name) : '<span class="none">未登记</span>'}</span>`;
+    if (holder && currentUser.isMaster) {
+      const del = document.createElement('button');
+      del.className = 'btn small danger';
+      del.textContent = '删除';
+      del.onclick = () => masterDeleteShift(day, slotId, r.key, holder.id);
+      rrow.appendChild(del);
+    }
+    sec.appendChild(rrow);
+    body.appendChild(sec);
+  });
+
+  if (slot.memo) {
+    const m = document.createElement('div');
+    m.className = 'detail-sec';
+    m.innerHTML = `<h4>备注</h4><div class="detail-memo">${esc(slot.memo)}</div>`;
+    body.appendChild(m);
+  }
+}
+
+async function masterDeleteShift(day, slotId, roleKey, uid) {
+  await DB.remove(`${monthPath()}/${day}/${slotId}/${roleKey}`);
+  if (uid !== MASTER_ID) {
+    await DB.set(`notifications/${uid}`, { flag: true, at: Date.now() });
+  }
+}
+
+/* ============================================================
+   ⑤ 我的班表
+   ============================================================ */
+function openMyShift() {
+  renderMyShift();
+  openSheet('sheet-myshift');
+}
+
+function renderMyShift() {
+  $('myshift-title').textContent = `我的班表 · ${viewYear}年${viewMonth}月`;
+  const body = $('myshift-body');
+  body.innerHTML = '';
+  const items = [];
+  entriesOf(monthData).forEach(([dayStr, dayData]) => {
+    const day = parseInt(dayStr, 10);
+    if (!day || !dayData) return;
+    slotList().forEach(([slotId, s]) => {
+      const slot = dayData[slotId];
+      if (!slot) return;
+      ROLES.forEach(r => {
+        if (slot[r.key] && slot[r.key].id === currentUser.id) {
+          items.push({ day, slotId, roleKey: r.key, roleLabel: r.label, slotLabel: banLabel(s) });
+        }
+      });
+    });
+  });
+  items.sort((a, b) => a.day - b.day || (slots[a.slotId].order - slots[b.slotId].order));
+  if (!items.length) {
+    body.innerHTML = '<p class="muted" style="text-align:center;padding:30px 0;">本月暂无班次</p>';
+    return;
+  }
+  items.forEach(it => {
+    const r = document.createElement('div');
+    r.className = 'ms-row';
+    r.innerHTML = `<span class="d">${viewMonth}/${it.day}</span><span class="t">${esc(it.slotLabel)}</span><span class="r">${it.roleLabel}</span>`;
+    const del = document.createElement('button');
+    del.className = 'btn small danger';
+    del.textContent = '删除';
+    del.onclick = () => DB.remove(`${monthPath()}/${it.day}/${it.slotId}/${it.roleKey}`);
+    r.appendChild(del);
+    body.appendChild(r);
+  });
+}
+
+/* ============================================================
+   管理面板（仅 master）
+   ============================================================ */
+function openAdmin() {
+  renderAdminSlots();
+  renderAdminUsers();
+  renderAdminShifts();
+  openSheet('sheet-admin');
+}
+
+function renderAdminSlots() {
+  const wrap = $('adm-slots');
+  wrap.innerHTML = '';
+  slotList().forEach(([slotId, s]) => {
+    const row = document.createElement('div');
+    row.className = 'adm-slot';
+    row.innerHTML = `<span>${banName(s)}</span>`;
+    const input = document.createElement('input');
+    input.value = s.time;
+    input.dataset.slot = slotId;
+    row.appendChild(input);
+    wrap.appendChild(row);
+  });
+}
+
+async function saveSlots() {
+  const newSlots = {};
+  document.querySelectorAll('#adm-slots input').forEach((input, i) => {
+    newSlots[input.dataset.slot] = { order: i + 1, time: input.value.trim() || '未设置' };
+  });
+  await DB.set('slots', newSlots);
+  $('adm-slots-msg').textContent = ' 已保存✓';
+  setTimeout(() => { $('adm-slots-msg').textContent = ''; }, 2000);
+}
+
+async function renderAdminUsers() {
+  const wrap = $('adm-users');
+  const users = await DB.get('users');
+  wrap.innerHTML = '';
+  const list = entriesOf(users);
+  if (!list.length) { wrap.innerHTML = '<p class="muted">暂无员工</p>'; return; }
+  list.forEach(([uid, u]) => {
+    const row = document.createElement('div');
+    row.className = 'adm-user';
+    row.innerHTML = `<div class="ui"><b>${esc(u.name)}</b><small>ID: ${esc(u.id)}　生日: ${esc(u.birth || '-')}</small></div>`;
+    const del = document.createElement('button');
+    del.className = 'btn small danger';
+    del.textContent = '删除';
+    del.onclick = async () => {
+      if (!confirm(`确定删除员工「${u.name}」吗？`)) return;
+      await DB.remove(`users/${uid}`);
+      await DB.remove(`notifications/${uid}`);
+      renderAdminUsers();
+    };
+    row.appendChild(del);
+    wrap.appendChild(row);
+  });
+}
+
+async function adminAddUser() {
+  const id = $('au-id').value.trim();
+  const name = $('au-name').value.trim();
+  const pw = $('au-pw').value;
+  const birth = $('au-birth').value.trim();
+  const err = $('adm-user-err');
+  err.textContent = '';
+  if (!id || !name || !pw || !birth) { err.textContent = '请填写所有项目'; return; }
+  if (!/^[A-Za-z0-9_-]+$/.test(id) || id === MASTER_ID) { err.textContent = 'ID不可用'; return; }
+  if (!/^\d{8}$/.test(birth)) { err.textContent = '生日格式 yyyymmdd'; return; }
+  const exists = await DB.get(`users/${id}`);
+  if (exists) { err.textContent = '该ID已存在'; return; }
+  await DB.set(`users/${id}`, { id, name, password: pw, birth, createdAt: Date.now() });
+  ['au-id', 'au-name', 'au-pw', 'au-birth'].forEach(i => $(i).value = '');
+  renderAdminUsers();
+}
+
+function renderAdminShifts() {
+  $('adm-month-label').textContent = `${viewYear}年${viewMonth}月`;
+  const wrap = $('adm-shifts');
+  wrap.innerHTML = '';
+  const rows = [];
+  entriesOf(monthData).forEach(([dayStr, dayData]) => {
+    const day = parseInt(dayStr, 10);
+    if (!day || !dayData) return;
+    slotList().forEach(([slotId, s]) => {
+      const slot = dayData[slotId];
+      if (!slot) return;
+      ROLES.forEach(r => {
+        const holder = slot[r.key] && slot[r.key].id ? slot[r.key] : null;
+        if (holder) rows.push({ day, slotId, slotLabel: banLabel(s), roleKey: r.key, roleLabel: r.label, uid: holder.id, name: holder.name });
+      });
+    });
+  });
+  rows.sort((a, b) => a.day - b.day || (slots[a.slotId].order - slots[b.slotId].order));
+  if (!rows.length) { wrap.innerHTML = '<p class="muted">本月暂无任何登记</p>'; return; }
+  rows.forEach(r => {
+    const el = document.createElement('div');
+    el.className = 'adm-shift-row';
+    el.innerHTML = `<span style="font-weight:700;min-width:40px;">${viewMonth}/${r.day}</span>` +
+      `<span class="flex1">${esc(r.slotLabel)}　${r.roleLabel}　${esc(r.name)}</span>`;
+    const del = document.createElement('button');
+    del.className = 'btn small danger';
+    del.textContent = '删除';
+    del.onclick = () => masterDeleteShift(r.day, r.slotId, r.roleKey, r.uid);
+    el.appendChild(del);
+    wrap.appendChild(el);
+  });
+}
+
+/* ============================================================
+   启动：会话恢复
+   ============================================================ */
+(function init() {
+  const saved = sessionStorage.getItem('pantera_user');
+  if (saved) {
+    try { enterApp(JSON.parse(saved)); } catch (e) {}
+  }
+})();
+</script>
+</body>
+</html>
