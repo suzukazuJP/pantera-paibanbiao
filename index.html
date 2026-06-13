@@ -353,14 +353,6 @@ input,textarea{
 <div id="banner"><span id="banner-text"></span><button onclick="hideBanner()">✕</button></div>
 <div id="sync-status"></div>
 
-<!-- ===== ① welcome ===== -->
-<div id="screen-welcome" class="screen show">
-  <h1>Welcome to Pantera</h1>
-  <button class="btn" onclick="openModal('modal-register')">注册</button>
-  <button class="btn" onclick="openModal('modal-login')">登录</button>
-  <button class="btn ghost" onclick="openModal('modal-help')">Help</button>
-</div>
-
 <!-- register modal -->
 <div class="overlay" id="modal-register">
   <div class="modal">
@@ -390,6 +382,11 @@ input,textarea{
       <button class="btn ghost" onclick="closeModal('modal-login')">取消</button>
       <button class="btn" onclick="doLogin()">登录</button>
     </div>
+    <p style="text-align:center;margin-top:12px;font-size:13px;">
+      <a href="javascript:;" style="color:var(--text-dim);" onclick="closeModal('modal-login');openModal('modal-register')">没有账号？去注册</a>
+      <span style="color:var(--line);margin:0 6px;">|</span>
+      <a href="javascript:;" style="color:var(--text-dim);" onclick="closeModal('modal-login');openModal('modal-help')">找回账号</a>
+    </p>
   </div>
 </div>
 
@@ -404,6 +401,18 @@ input,textarea{
     <div class="row">
       <button class="btn ghost" onclick="closeModal('modal-help')">关闭</button>
       <button class="btn" onclick="doHelp()">查询</button>
+    </div>
+  </div>
+</div>
+
+<!-- auth required prompt -->
+<div class="overlay" id="modal-auth" style="z-index:85;">
+  <div class="modal" style="text-align:center;">
+    <h2>需要登录</h2>
+    <p class="muted" style="margin-bottom:14px;">登记班表前请先登录或注册</p>
+    <div class="row">
+      <button class="btn ghost" onclick="closeModal('modal-auth');openModal('modal-register')">注册</button>
+      <button class="btn" onclick="closeModal('modal-auth');openModal('modal-login')">登录</button>
     </div>
   </div>
 </div>
@@ -423,8 +432,10 @@ input,textarea{
 <div id="screen-calendar" class="screen">
   <div id="cal-header">
     <span class="uname" id="cal-uname"></span>
+    <button class="btn small" id="btn-register" onclick="openModal('modal-register')">注册</button>
+    <button class="btn small ghost" id="btn-login" onclick="openModal('modal-login')">登录</button>
     <button class="btn small ghost" id="btn-admin" style="display:none" onclick="openAdmin()">⚙ 管理</button>
-    <button class="btn small ghost" onclick="doLogout()">退出</button>
+    <button class="btn small ghost" id="btn-logout" style="display:none" onclick="doLogout()">退出</button>
   </div>
   <div id="month-nav">
     <button id="nav-prev" onclick="navMonth(-1)">‹</button>
@@ -751,27 +762,28 @@ function esc(s) {
 }
 
 /* ============================================================
-   进入 / 退出主界面
+   头部按钮状态：根据是否登录显示「注册/登录」或「管理/退出」
+   ============================================================ */
+function updateHeaderUI() {
+  const logged = !!currentUser;
+  $('btn-register').style.display = logged ? 'none' : '';
+  $('btn-login').style.display = logged ? 'none' : '';
+  $('btn-logout').style.display = logged ? '' : 'none';
+  $('btn-admin').style.display = (logged && currentUser.isMaster) ? '' : 'none';
+  $('cal-uname').textContent = logged ? (currentUser.isMaster ? '👑 ' + currentUser.name : currentUser.name) : '';
+  /* 仅登录后显示「我的班表」按钮 */
+  $('fab-myshift').style.display = logged ? '' : 'none';
+}
+
+/* ============================================================
+   登录后处理（不切换屏幕，只更新头部并查通知）
    ============================================================ */
 async function enterApp(user) {
   currentUser = user;
   sessionStorage.setItem('pantera_user', JSON.stringify(user));
-  $('cal-uname').textContent = user.isMaster ? '👑 ' + user.name : user.name;
-  $('btn-admin').style.display = user.isMaster ? '' : 'none';
-  $('screen-welcome').classList.remove('show');
-  $('screen-calendar').classList.add('show');
-
-  const now = new Date();
-  viewYear = Math.max(now.getFullYear(), 2026);
-  viewMonth = now.getFullYear() >= 2026 ? now.getMonth() + 1 : 1;
-
-  if (unsubSlots) unsubSlots();
-  unsubSlots = DB.watch('slots', val => {
-    slots = val || JSON.parse(JSON.stringify(DEFAULT_SLOTS));
-    renderBanLegend(); renderCalendar(); refreshOpenViews();
-  });
-  subscribeMonth();
-
+  updateHeaderUI();
+  refreshOpenViews();
+  renderCalendar();
   if (!user.isMaster) {
     const n = await DB.get(`notifications/${user.id}`);
     if (n) {
@@ -783,12 +795,17 @@ async function enterApp(user) {
 
 function doLogout() {
   sessionStorage.removeItem('pantera_user');
-  if (unsubMonth) { unsubMonth(); unsubMonth = null; }
-  if (unsubSlots) { unsubSlots(); unsubSlots = null; }
   currentUser = null;
   closeAllSheets();
-  $('screen-calendar').classList.remove('show');
-  $('screen-welcome').classList.add('show');
+  updateHeaderUI();
+  renderCalendar();
+}
+
+/* ゲスト操作時に呼ぶ：登录プロンプトを表示 */
+function requireAuth() {
+  if (currentUser) return true;
+  openModal('modal-auth');
+  return false;
 }
 
 /* ============================================================
@@ -1004,7 +1021,7 @@ function renderShiftRows() {
       const mine = holder && holder.id === currentUser.id;
       btn.className = 'role-btn' + (mine ? ' mine' : holder ? ' taken' : '');
       btn.innerHTML = `${r.label}<small>${holder ? esc(holder.name) : '－'}</small>`;
-      btn.addEventListener('click', () => toggleRole(sheetDay, slotId, r.key));
+      btn.addEventListener('click', () => { if (!requireAuth()) return; toggleRole(sheetDay, slotId, r.key); });
       grid.appendChild(btn);
     });
     row.appendChild(grid);
@@ -1014,8 +1031,11 @@ function renderShiftRows() {
     memo.dataset.slot = slotId;
     memo.placeholder = '备注…（长按放大）';
     memo.value = slot.memo || '';
-    memo.addEventListener('change', () => saveMemo(sheetDay, slotId, memo.value));
-    addPress(memo, () => {}, () => openMemoModal(sheetDay, slotId, memo.value));
+    memo.readOnly = !currentUser;
+    memo.addEventListener('focus', e => { if (!currentUser) { e.target.blur(); requireAuth(); } });
+    memo.addEventListener('mousedown', e => { if (!currentUser) { e.preventDefault(); requireAuth(); } });
+    memo.addEventListener('change', () => { if (currentUser) saveMemo(sheetDay, slotId, memo.value); });
+    addPress(memo, () => {}, () => { if (!requireAuth()) return; openMemoModal(sheetDay, slotId, memo.value); });
     row.appendChild(memo);
 
     wrap.appendChild(row);
@@ -1117,6 +1137,7 @@ async function masterDeleteShift(day, slotId, roleKey, uid) {
    ⑤ 我的班表
    ============================================================ */
 function openMyShift() {
+  if (!requireAuth()) return;
   renderMyShift();
   openSheet('sheet-myshift');
 }
@@ -1267,13 +1288,28 @@ function renderAdminShifts() {
 }
 
 /* ============================================================
-   启动：会话恢复
+   启动：直接打开日历，未登录也可浏览
    ============================================================ */
 (function init() {
+  /* 始终显示日历画面 */
+  $('screen-calendar').classList.add('show');
+  /* 当前月份 */
+  const now = new Date();
+  viewYear = Math.max(now.getFullYear(), 2026);
+  viewMonth = now.getFullYear() >= 2026 ? now.getMonth() + 1 : 1;
+  /* 订阅班次时间和当月数据（无需登录） */
+  if (unsubSlots) unsubSlots();
+  unsubSlots = DB.watch('slots', val => {
+    slots = val || JSON.parse(JSON.stringify(DEFAULT_SLOTS));
+    renderBanLegend(); renderCalendar(); refreshOpenViews();
+  });
+  subscribeMonth();
+  /* 会话恢复 */
   const saved = sessionStorage.getItem('pantera_user');
   if (saved) {
-    try { enterApp(JSON.parse(saved)); } catch (e) {}
+    try { enterApp(JSON.parse(saved)); return; } catch (e) {}
   }
+  updateHeaderUI();
 })();
 </script>
 </body>
