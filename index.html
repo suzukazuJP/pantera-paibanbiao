@@ -117,10 +117,16 @@ input,textarea{
   position:absolute;right:8px;top:50%;transform:translateY(-50%);
   border:none;background:none;font-size:18px;cursor:pointer;color:#fff;
 }
-#mock-note{
-  position:fixed;bottom:2px;left:0;right:0;text-align:center;
-  font-size:9px;color:#bbb;z-index:5;pointer-events:none;display:none;
+#sync-status{
+  position:fixed;bottom:6px;left:50%;transform:translateX(-50%);
+  z-index:200;padding:3px 12px;border-radius:14px;
+  font-size:11px;font-weight:500;white-space:nowrap;
+  box-shadow:0 2px 8px rgba(0,0,0,.12);display:none;
 }
+#sync-status.show{display:block;}
+#sync-status.online{background:#d8f3e3;color:#1a7a45;}
+#sync-status.connecting{background:#fdecc8;color:#9a6700;}
+#sync-status.mock{background:#eeeeee;color:#888888;}
 
 /* ===== calendar ===== */
 #cal-header{
@@ -345,7 +351,7 @@ input,textarea{
 
 <!-- notification banner -->
 <div id="banner"><span id="banner-text"></span><button onclick="hideBanner()">✕</button></div>
-<div id="mock-note">演示模式：尚未配置 Firebase，数据仅保存在本机浏览器中</div>
+<div id="sync-status"></div>
 
 <!-- ===== ① welcome ===== -->
 <div id="screen-welcome" class="screen show">
@@ -575,8 +581,14 @@ const ROLE_LABEL = Object.fromEntries(ROLES.map(r => [r.key, r.label]));
    ============================================================ */
 const USE_MOCK = !firebaseConfig.databaseURL || /YOUR_/.test(firebaseConfig.databaseURL);
 let DB;
+const syncEl = document.getElementById('sync-status');
+function setSync(state) {
+  if (state === 'online') { syncEl.className = 'show online'; syncEl.textContent = '🍃 实时同步中'; }
+  else if (state === 'connecting') { syncEl.className = 'show connecting'; syncEl.textContent = '🔌 连接中…'; }
+  else { syncEl.className = 'show mock'; syncEl.textContent = '⚠️ 演示模式（仅本机，未连接服务器）'; }
+}
 if (USE_MOCK) {
-  document.getElementById('mock-note').style.display = 'block';
+  setSync('mock');
   const store = { data: {}, watchers: [] };
   const load = () => { try { store.data = JSON.parse(localStorage.getItem('pantera_db') || '{}'); } catch (e) { store.data = {}; } };
   load();
@@ -607,8 +619,11 @@ if (USE_MOCK) {
     }
   };
 } else {
+  setSync('connecting');
   firebase.initializeApp(firebaseConfig);
   const fdb = firebase.database();
+  /* 实时连接状态：连上服务器→绿色「实时同步中」，断线→「连接中…」 */
+  fdb.ref('.info/connected').on('value', s => setSync(s.val() === true ? 'online' : 'connecting'));
   DB = {
     get: p => fdb.ref(p).once('value').then(s => s.val()),
     set: (p, v) => fdb.ref(p).set(v),
