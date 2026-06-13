@@ -128,6 +128,24 @@ input,textarea{
 #sync-status.connecting{background:#fdecc8;color:#9a6700;}
 #sync-status.mock{background:#eeeeee;color:#888888;}
 
+/* 撤销提示 */
+#undo-toast{
+  position:fixed;bottom:30px;left:50%;transform:translateX(-50%) translateY(20px);
+  z-index:250;padding:10px 14px;border-radius:24px;
+  background:var(--ink);color:#fff;font-size:13px;font-weight:500;
+  display:flex;align-items:center;gap:12px;white-space:nowrap;
+  box-shadow:0 6px 20px rgba(0,0,0,.3);
+  opacity:0;pointer-events:none;
+  transition:opacity .2s,transform .25s var(--ease);
+}
+#undo-toast.show{opacity:1;transform:translateX(-50%) translateY(0);pointer-events:auto;}
+#undo-toast button{
+  background:var(--gold,#f5d77a);background:#f9e4a0;color:var(--ink);
+  border:none;border-radius:14px;padding:5px 12px;font-size:13px;font-weight:700;cursor:pointer;
+}
+#undo-toast button:active{filter:brightness(.85);}
+#undo-toast .timer{font-size:11px;color:#aaa;}
+
 /* ===== calendar ===== */
 #cal-header{
   display:flex;align-items:center;justify-content:flex-end;gap:8px;
@@ -352,6 +370,11 @@ input,textarea{
 <!-- notification banner -->
 <div id="banner"><span id="banner-text"></span><button onclick="hideBanner()">✕</button></div>
 <div id="sync-status"></div>
+<div id="undo-toast">
+  <span id="undo-text"></span>
+  <span class="timer" id="undo-timer"></span>
+  <button onclick="undoDeleteSlot()">撤销</button>
+</div>
 
 <!-- register modal -->
 <div class="overlay" id="modal-register">
@@ -510,8 +533,12 @@ input,textarea{
     <div class="adm-sec">
       <h4>班次时间设置</h4>
       <div id="adm-slots"></div>
-      <button class="btn small" onclick="saveSlots()">保存班次时间</button>
+      <div style="display:flex;gap:8px;margin-top:6px;">
+        <button class="btn small" onclick="saveSlots()">保存班次时间</button>
+        <button class="btn small ghost" onclick="adminAddSlot()">＋ 添加班次</button>
+      </div>
       <span class="muted" id="adm-slots-msg"></span>
+      <p class="muted" style="margin-top:6px;font-size:12px;">提示：保存后日历会即时更新。删除班次会清除该班次本月的全部排班数据。</p>
     </div>
     <div class="adm-sec">
       <h4>员工管理</h4>
@@ -1231,26 +1258,165 @@ function openAdmin() {
 function renderAdminSlots() {
   const wrap = $('adm-slots');
   wrap.innerHTML = '';
-  slotList().forEach(([slotId, s]) => {
+  slotList().forEach(([slotId, s], idx) => {
     const row = document.createElement('div');
     row.className = 'adm-slot';
-    row.innerHTML = `<span>${banName(s)}</span>`;
+    row.innerHTML = `<span>${idx + 1}班</span>`;
     const input = document.createElement('input');
     input.value = s.time;
     input.dataset.slot = slotId;
     row.appendChild(input);
+    const del = document.createElement('button');
+    del.className = 'btn small danger';
+    del.textContent = '删除';
+    del.onclick = () => adminDeleteSlot(slotId, idx + 1);
+    row.appendChild(del);
     wrap.appendChild(row);
   });
 }
 
+/* 「10:00〜12:00」「25:00〜27:00」などから開始時間を分単位に変換。
+   解析できないものは末尾に来るよう大きな値を返す。 */
+function timeToMinutes(timeStr) {
+  if (!timeStr || typeof timeStr !== 'string') return 99999;
+  const m = timeStr.match(/(\d{1,2}):(\d{2})/);
+  if (!m) return 99999;
+  return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+}
+
 async function saveSlots() {
-  const newSlots = {};
-  document.querySelectorAll('#adm-slots input').forEach((input, i) => {
-    newSlots[input.dataset.slot] = { order: i + 1, time: input.value.trim() || '未设置' };
+  /* 1) 入力値を集める　2) 開始時間で昇順ソート　3) order を振り直して保存 */
+  const entries = [];
+  document.querySelectorAll('#adm-slots input').forEach(input => {
+    entries.push([input.dataset.slot, { time: input.value.trim() || '未设置' }]);
   });
+  entries.sort((a, b) => timeToMinutes(a[1].time) - timeToMinutes(b[1].time));
+  const newSlots = {};
+  entries.forEach(([id, s], i) => { newSlots[id] = { order: i + 1, time: s.time }; });
   await DB.set('slots', newSlots);
-  $('adm-slots-msg').textContent = ' 已保存✓';
-  setTimeout(() => { $('adm-slots-msg').textContent = ''; }, 2000);
+  if ($('sheet-admin').classList.contains('open')) renderAdminSlots();
+  $('adm-slots-msg').textContent = ' 已保存（按开始时间排序）✓';
+  setTimeout(() => { $('adm-slots-msg').textContent = ''; }, 2500);
+}
+
+/* 班次を追加：未使用の slotId（s1〜s99）を割り当てる */
+async function adminAddSlot() {
+  /* 先に画面の編集中の時刻を保存（パネルが開いていれば） */
+  const editing = {};
+  const inputs = document.querySelectorAll('#adm-slots input');
+  if (inputs.length) {
+    inputs.forEach((input, i) => {
+      editing[input.dataset.slot] = { order: i + 1, time: input.value.trim() || '未设置' };
+    });
+  } else {
+    slotList().forEach(([id, s], i) => { editing[id] = { order: i + 1, time: s.time }; });
+  }
+  /* DOM 上 + 现有 slots 状態の両方から未使用 ID を探す */
+  const usedIds = new Set([...Object.keys(editing), ...Object.keys(slots || {})]);
+  let newId = null;
+  for (let n = 1; n <= 99; n++) {
+    if (!usedIds.has('s' + n)) { newId = 's' + n; break; }
+  }
+  if (!newId) { alert('班次数已达上限'); return; }
+  editing[newId] = { time: '00:00〜00:00' };
+  /* 開始時間で並び替えてから order を振り直す */
+  const sorted = Object.entries(editing).sort((a, b) => timeToMinutes(a[1].time) - timeToMinutes(b[1].time));
+  const newSlots = {};
+  sorted.forEach(([id, s], i) => { newSlots[id] = { order: i + 1, time: s.time }; });
+  await DB.set('slots', newSlots);
+  if ($('sheet-admin').classList.contains('open')) renderAdminSlots();
+  $('adm-slots-msg').textContent = ' 已添加新班次（修改时间后保存即可重排）✓';
+  setTimeout(() => { $('adm-slots-msg').textContent = ''; }, 3000);
+}
+
+/* 撤销用のスナップショット：60秒間保持 */
+const UNDO_WINDOW_MS = 60 * 1000;
+let lastDeletedSlot = null;
+let undoHideTimer = null, undoTickTimer = null;
+
+/* 班次を削除：本月の该班次データも合わせて削除（60秒以内なら撤销可） */
+async function adminDeleteSlot(slotId, displayOrder) {
+  const list = slotList();
+  if (list.length <= 1) { alert('至少需要保留一个班次'); return; }
+  if (!confirm(`确定删除「${displayOrder}班」吗？\n该班次本月的排班数据将一同删除（60秒内可撤销）。`)) return;
+
+  /* === スナップショット === */
+  const slotSnapshot = slots[slotId] ? { ...slots[slotId] } : null;
+  const shiftSnapshot = {};
+  entriesOf(monthData).forEach(([day, dayData]) => {
+    if (dayData && dayData[slotId]) shiftSnapshot[day] = JSON.parse(JSON.stringify(dayData[slotId]));
+  });
+  lastDeletedSlot = {
+    slotId,
+    slot: slotSnapshot,
+    shiftData: shiftSnapshot,
+    monthY: viewYear,
+    monthM: viewMonth,
+    displayOrder,
+    deletedAt: Date.now()
+  };
+
+  /* 編集中の値も保持しつつ削除 */
+  const editing = {};
+  document.querySelectorAll('#adm-slots input').forEach(input => {
+    if (input.dataset.slot !== slotId) editing[input.dataset.slot] = { time: input.value.trim() || '未设置' };
+  });
+  /* order を振り直し */
+  const ordered = {};
+  list.filter(([id]) => id !== slotId).forEach(([id], i) => {
+    ordered[id] = { order: i + 1, time: editing[id] ? editing[id].time : slots[id].time };
+  });
+  await DB.set('slots', ordered);
+  /* 当月のこの slotId に紐づく班表データを全日から削除 */
+  const days = entriesOf(monthData);
+  for (const [day] of days) {
+    await DB.remove(`${monthPath()}/${day}/${slotId}`);
+  }
+  if ($('sheet-admin').classList.contains('open')) renderAdminSlots();
+  showUndoToast(`已删除「${displayOrder}班」`);
+}
+
+function showUndoToast(text) {
+  const t = $('undo-toast');
+  $('undo-text').textContent = text;
+  t.classList.add('show');
+  if (undoHideTimer) clearTimeout(undoHideTimer);
+  if (undoTickTimer) clearInterval(undoTickTimer);
+  const start = Date.now();
+  const tick = () => {
+    const left = Math.max(0, UNDO_WINDOW_MS - (Date.now() - start));
+    $('undo-timer').textContent = Math.ceil(left / 1000) + 's';
+  };
+  tick();
+  undoTickTimer = setInterval(tick, 500);
+  undoHideTimer = setTimeout(() => {
+    t.classList.remove('show');
+    lastDeletedSlot = null;
+    clearInterval(undoTickTimer);
+  }, UNDO_WINDOW_MS);
+}
+
+async function undoDeleteSlot() {
+  if (!lastDeletedSlot) return;
+  const { slotId, slot, shiftData, monthY, monthM } = lastDeletedSlot;
+  /* 1) 班次を復元 → 開始時間で再ソート */
+  const editing = {};
+  slotList().forEach(([id, s]) => { editing[id] = { time: s.time }; });
+  editing[slotId] = { time: slot ? slot.time : '00:00〜00:00' };
+  const sorted = Object.entries(editing).sort((a, b) => timeToMinutes(a[1].time) - timeToMinutes(b[1].time));
+  const newSlots = {};
+  sorted.forEach(([id, s], i) => { newSlots[id] = { order: i + 1, time: s.time }; });
+  await DB.set('slots', newSlots);
+  /* 2) シフトデータを復元 */
+  for (const [day, data] of Object.entries(shiftData)) {
+    await DB.set(`shifts/${monthY}/${monthM}/${day}/${slotId}`, data);
+  }
+  /* 後片付け */
+  lastDeletedSlot = null;
+  clearTimeout(undoHideTimer);
+  clearInterval(undoTickTimer);
+  $('undo-toast').classList.remove('show');
+  if ($('sheet-admin').classList.contains('open')) renderAdminSlots();
 }
 
 async function renderAdminUsers() {
