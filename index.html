@@ -439,7 +439,7 @@ input,textarea{
     <p class="muted" style="margin-bottom:14px;">登记班表前请先登录或注册</p>
     <div class="row">
       <button class="btn ghost" onclick="closeModal('modal-auth');openModal('modal-register')">注册</button>
-      <button class="btn" onclick="closeModal('modal-auth');openModal('modal-login')">登录</button>
+      <button class="btn" onclick="closeModal('modal-auth');handleLoginClick()">登录</button>
     </div>
   </div>
 </div>
@@ -460,7 +460,7 @@ input,textarea{
   <div id="cal-header">
     <span class="uname" id="cal-uname"></span>
     <button class="btn small" id="btn-register" onclick="openModal('modal-register')">注册</button>
-    <button class="btn small ghost" id="btn-login" onclick="openModal('modal-login')">登录</button>
+    <button class="btn small ghost" id="btn-login" onclick="handleLoginClick()">登录</button>
     <button class="btn small ghost" id="btn-admin" style="display:none" onclick="openAdmin()">⚙ 管理</button>
     <button class="btn small ghost" id="btn-logout" style="display:none" onclick="doLogout()">退出</button>
   </div>
@@ -809,10 +809,17 @@ function updateHeaderUI() {
 /* ============================================================
    登录后处理（不切换屏幕，只更新头部并查通知）
    ============================================================ */
-/* ログインセッション保持：30分有効 */
+/* ログインセッション保持：
+   - SESSION：30分の操作中セッション。操作のたび自動延長。退出時にクリア
+   - REMEMBER：4時間の再ログイン記憶。退出してもクリアしないので
+              「登录」ボタンで再入力なしに復元できる */
 const SESSION_TTL_MS = 30 * 60 * 1000;
+const REMEMBER_TTL_MS = 4 * 60 * 60 * 1000;
 function saveSession(user) {
   localStorage.setItem('pantera_user', JSON.stringify({ user, exp: Date.now() + SESSION_TTL_MS }));
+  /* REMEMBER はログイン時にだけセット（既存があってもそのままだと退出後の続行で更新されない）
+     ここで毎回更新することで、活動中ユーザーの記憶も延長される */
+  localStorage.setItem('pantera_remember', JSON.stringify({ user, exp: Date.now() + REMEMBER_TTL_MS }));
 }
 function loadSession() {
   try {
@@ -824,7 +831,30 @@ function loadSession() {
     return obj.user;
   } catch (e) { return null; }
 }
+function loadRemember() {
+  try {
+    const raw = localStorage.getItem('pantera_remember');
+    if (!raw) return null;
+    const obj = JSON.parse(raw);
+    if (!obj || !obj.user || !obj.exp) return null;
+    if (Date.now() > obj.exp) { localStorage.removeItem('pantera_remember'); return null; }
+    return obj.user;
+  } catch (e) { return null; }
+}
+/* 退出は SESSION のみクリア（REMEMBER は残し、4時間以内なら登录ボタンで即復元可能） */
 function clearSession() { localStorage.removeItem('pantera_user'); }
+function clearRemember() { localStorage.removeItem('pantera_remember'); }
+
+/* 登录ボタンの動作：
+   4時間以内の記憶があれば入力なしで即ログイン、なければ通常のログインモーダルを開く */
+function handleLoginClick() {
+  const remembered = loadRemember();
+  if (remembered) {
+    enterApp(remembered);
+  } else {
+    openModal('modal-login');
+  }
+}
 
 async function enterApp(user) {
   currentUser = user;
