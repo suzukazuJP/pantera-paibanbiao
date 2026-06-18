@@ -18,6 +18,7 @@
   --green:#a8e6c1;
   --yellow:#f9e4a0;
   --red:#f5a8a8;
+  --blue:#a9c9f5;
   --ease:cubic-bezier(0.32,0.72,0,1);
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
@@ -152,6 +153,23 @@ input,textarea{
   padding:8px 12px 4px;
 }
 #cal-header .uname{font-size:14px;font-weight:700;color:var(--ink);margin-right:auto;}
+#room-bar{display:flex;justify-content:center;padding:2px 0 4px;}
+#room-switch{
+  border:1px solid var(--line);border-radius:18px;
+  background:var(--card);color:var(--ink);
+  font-size:13px;font-weight:700;font-family:inherit;
+  padding:5px 16px;cursor:pointer;max-width:80vw;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  box-shadow:0 2px 6px rgba(0,0,0,.1);
+}
+#room-switch:active{filter:brightness(.93);}
+.room-row{
+  display:flex;align-items:center;gap:8px;
+  background:var(--card);border-radius:8px;padding:8px 12px;margin-bottom:8px;
+  border:1px solid transparent;
+}
+.room-row.active{border-color:var(--ink);}
+.room-row .rn{flex:1;font-size:15px;font-weight:500;cursor:pointer;min-width:0;word-break:break-word;}
 #month-nav{
   display:flex;align-items:center;justify-content:center;gap:18px;
   padding:2px 0 4px;
@@ -187,11 +205,13 @@ input,textarea{
 #color-legend{
   font-size:9px;color:var(--text-dim);line-height:1.7;text-align:right;flex-shrink:0;
 }
-#color-legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:3px;vertical-align:-1px;}
+#color-legend div{display:flex;align-items:center;justify-content:flex-end;gap:4px;}
+#color-legend i{display:inline-block;width:9px;height:9px;border-radius:2px;vertical-align:-1px;flex-shrink:0;}
 
 #weekday-row{display:grid;grid-template-columns:repeat(7,1fr);padding:0 4px;}
 #weekday-row div{text-align:center;font-size:11px;color:var(--text-dim);padding:1px 0;}
-#weekday-row div:last-child{color:#d06060;}
+#weekday-row div:first-child{color:#d06060;}
+#weekday-row div:last-child{color:#5a82c0;}
 #cal-grid{
   flex:1;display:grid;grid-template-columns:repeat(7,1fr);
   grid-auto-rows:minmax(0,1fr);
@@ -226,6 +246,7 @@ input,textarea{
 .ban-row .rc.on{background:rgba(255,255,255,.6);}
 .ban-row .ef{flex:0.75;display:flex;flex-direction:column;gap:1px;min-width:0;}
 .ban-row .ef .rc{flex:1;font-size:6px;}
+.ban-row .ban-div{flex:0 0 1.5px;width:1.5px;align-self:stretch;background:rgba(0,0,0,.3);border-radius:0;}
 .ban-row .memoflag{
   position:absolute;top:0;right:0;
   font-size:7px;line-height:1;font-style:normal;
@@ -337,7 +358,8 @@ input,textarea{
   background:var(--card);border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:14px;
 }
 .ms-row .d{font-weight:700;min-width:44px;}
-.ms-row .t{flex:1;}
+.ms-row .t{flex:1;min-width:0;}
+.ms-row .ms-room{display:inline-block;background:#e7eefb;color:#3a5a8c;border-radius:4px;padding:0 5px;font-size:11px;margin-right:5px;}
 .ms-row .r{color:var(--text-dim);}
 
 /* admin */
@@ -417,6 +439,18 @@ input,textarea{
   </div>
 </div>
 
+<!-- re-login confirm modal -->
+<div class="overlay" id="modal-relogin" style="z-index:86;">
+  <div class="modal" style="text-align:center;">
+    <h2>继续登录</h2>
+    <p class="muted" id="relogin-name" style="margin-bottom:14px;"></p>
+    <div class="row">
+      <button class="btn ghost" onclick="reloginSwitch()">切换账号</button>
+      <button class="btn" onclick="reloginContinue()">继续</button>
+    </div>
+  </div>
+</div>
+
 <!-- help modal -->
 <div class="overlay" id="modal-help">
   <div class="modal">
@@ -464,6 +498,9 @@ input,textarea{
     <button class="btn small ghost" id="btn-admin" style="display:none" onclick="openAdmin()">⚙ 管理</button>
     <button class="btn small ghost" id="btn-logout" style="display:none" onclick="doLogout()">退出</button>
   </div>
+  <div id="room-bar">
+    <button id="room-switch" onclick="openRoomPicker()">📺 直播间</button>
+  </div>
   <div id="month-nav">
     <button id="nav-prev" onclick="navMonth(-1)">‹</button>
     <span id="month-label"></span>
@@ -473,18 +510,19 @@ input,textarea{
     <div id="legend-left">
       <div id="role-legend">
         <b>A</b><b>B</b><b>C</b><b>D</b><b>E/F</b>
-        <span>直播1</span><span>直播2</span><span>中控1</span><span>中控2</span><span>待机</span>
+        <span>主播1</span><span>主播2</span><span>中控1</span><span>中控2</span><span>机动</span>
       </div>
       <div id="ban-legend"></div>
     </div>
     <div id="color-legend">
-      <div><i style="background:var(--green)"></i>直播·中控已齐</div>
-      <div><i style="background:var(--yellow)"></i>缺一方</div>
-      <div><i style="background:var(--red)"></i>无人</div>
+      <div>主播·中控已齐<i style="background:var(--green)"></i></div>
+      <div>需协调<i style="background:var(--blue)"></i></div>
+      <div>缺一方<i style="background:var(--yellow)"></i></div>
+      <div>无人<i style="background:var(--red)"></i></div>
     </div>
   </div>
   <div id="weekday-row">
-    <div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div><div>日</div>
+    <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
   </div>
   <div id="cal-grid"></div>
   <button id="fab-myshift" onclick="openMyShift()">我的班表</button>
@@ -526,6 +564,24 @@ input,textarea{
   <div class="sheet-body" id="myshift-body"></div>
 </div>
 
+<!-- ===== room picker ===== -->
+<div class="sheet" id="sheet-rooms">
+  <div class="sheet-header" data-swipe="sheet-rooms">
+    <div class="sheet-grip"></div>
+    <h3>选择直播间</h3>
+    <button class="sheet-close" onclick="closeSheet('sheet-rooms')">✕</button>
+  </div>
+  <div class="sheet-body">
+    <div id="room-list"></div>
+    <div class="adm-add" style="margin-top:14px;">
+      <input id="new-room-name" placeholder="新直播间名称">
+    </div>
+    <button class="btn small" style="margin-top:8px;" onclick="addRoom()">＋ 添加直播间</button>
+    <span class="err" id="room-err" style="display:inline-block;"></span>
+    <p class="muted" style="margin-top:8px;font-size:12px;">点击直播间名称即可切换。删除直播间会清除其全部排班数据（不可恢复）。</p>
+  </div>
+</div>
+
 <!-- ===== admin panel ===== -->
 <div class="sheet" id="sheet-admin" style="max-height:92vh;">
   <div class="sheet-header" data-swipe="sheet-admin">
@@ -535,7 +591,7 @@ input,textarea{
   </div>
   <div class="sheet-body">
     <div class="adm-sec">
-      <h4>班次时间设置</h4>
+      <h4>班次时间设置（<span id="adm-slot-room"></span>）</h4>
       <div id="adm-slots"></div>
       <div style="display:flex;gap:8px;margin-top:6px;">
         <button class="btn small" onclick="saveSlots()">保存班次时间</button>
@@ -608,12 +664,12 @@ const banLabel = s => `${s.order}班 ${s.time}`;
 /* 角色定义：A〜F，各角色上限1人
    G = A+B（直播组） H = C+D（中控组） I = E+F（待机组） */
 const ROLES = [
-  { key:'A', label:'直播1', group:'G' },
-  { key:'B', label:'直播2', group:'G' },
+  { key:'A', label:'主播1', group:'G' },
+  { key:'B', label:'主播2', group:'G' },
   { key:'C', label:'中控1', group:'H' },
   { key:'D', label:'中控2', group:'H' },
-  { key:'E', label:'待机1', group:'I' },
-  { key:'F', label:'待机2', group:'I' }
+  { key:'E', label:'机动1', group:'I' },
+  { key:'F', label:'机动2', group:'I' }
 ];
 const ROLE_LABEL = Object.fromEntries(ROLES.map(r => [r.key, r.label]));
 
@@ -679,12 +735,14 @@ if (USE_MOCK) {
    ============================================================ */
 let currentUser = null;            // {id, name, isMaster}
 let viewYear = 2026, viewMonth = 1;
-let monthData = {};                // /shifts/{y}/{m} 的内容
+let monthData = {};                // /shifts/{roomId}/{y}/{m} 的内容
 let slots = JSON.parse(JSON.stringify(DEFAULT_SLOTS));
-let unsubMonth = null, unsubSlots = null;
+let unsubMonth = null, unsubSlots = null, unsubRooms = null;
 let sheetDay = null;               // 班表登记面板对应的日
 let detailCtx = null;              // {day, slotId}
 let memoCtx = null;                // {day, slotId}
+let rooms = {};                    // /rooms 的内容 {roomId:{name,order}}
+let currentRoomId = null;          // 当前选中的直播间
 
 const $ = id => document.getElementById(id);
 function entriesOf(x) {
@@ -710,7 +768,15 @@ function roleHolder(day, slotId, roleKey) {
   const v = s && s[roleKey];
   return (v && v.id) ? v : null;
 }
-const monthPath = () => `shifts/${viewYear}/${viewMonth}`;
+const monthPath = () => `shifts/${currentRoomId}/${viewYear}/${viewMonth}`;
+const slotsPath = () => `slots/${currentRoomId}`;
+function roomList() {
+  return entriesOf(rooms).sort((a, b) => (a[1].order || 0) - (b[1].order || 0));
+}
+function currentRoomName() {
+  const r = rooms && rooms[currentRoomId];
+  return r ? r.name : '直播间';
+}
 
 /* ============================================================
    模态框 / 密码眼睛
@@ -754,7 +820,8 @@ async function doRegister() {
   if (!/^\d{8}$/.test(birth)) { err.textContent = '出生日期格式应为 yyyymmdd'; return; }
   const exists = await DB.get(`users/${id}`);
   if (exists) { err.textContent = '该ID已被注册'; return; }
-  await DB.set(`users/${id}`, { id, name, password: pw, birth, createdAt: Date.now() });
+  const seq = await nextUserSeq();
+  await DB.set(`users/${id}`, { id, name, password: pw, birth, seq, createdAt: Date.now() });
   closeModal('modal-register');
   enterApp({ id, name, isMaster: false });
 }
@@ -846,14 +913,29 @@ function clearSession() { localStorage.removeItem('pantera_user'); }
 function clearRemember() { localStorage.removeItem('pantera_remember'); }
 
 /* 登录ボタンの動作：
-   4時間以内の記憶があれば入力なしで即ログイン、なければ通常のログインモーダルを開く */
+   4時間以内の記憶があれば「継続 / 別アカウントに切替」を選べる確認を表示。
+   記憶が無ければ通常のログインモーダルを開く */
+let _rememberedPending = null;
 function handleLoginClick() {
   const remembered = loadRemember();
   if (remembered) {
-    enterApp(remembered);
+    _rememberedPending = remembered;
+    $('relogin-name').textContent = `以「${remembered.name}」身份继续，或切换其他账号`;
+    openModal('modal-relogin');
   } else {
     openModal('modal-login');
   }
+}
+function reloginContinue() {
+  closeModal('modal-relogin');
+  if (_rememberedPending) enterApp(_rememberedPending);
+  _rememberedPending = null;
+}
+function reloginSwitch() {
+  closeModal('modal-relogin');
+  clearRemember();
+  _rememberedPending = null;
+  openModal('modal-login');
 }
 
 async function enterApp(user) {
@@ -914,16 +996,20 @@ function renderBanLegend() {
     .map(([, s]) => `<div>${CIRCLED[s.order - 1] || s.order}${esc(s.time)}</div>`).join('');
 }
 
-/* 颜色逻辑：G=A+B  H=C+D  I=E+F
-   两组以上有人→绿 / 仅一组有人→黄 / 全空→红 */
+/* 颜色逻辑：G=主播(A+B)  H=中控(C+D)  I=机动(E+F)
+   - 全空 → 红（无人）
+   - 仅一组有人 → 黄（缺一方）
+   - 主播恰好1人 且 中控恰好1人 且 无机动 → 绿（标准配置）
+   - 其余有多组有人的情况 → 蓝（需协调） */
 function banRowColor(day, slotId) {
   const s = getSlotData(day, slotId);
   const has = k => (s && s[k] && s[k].id) ? 1 : 0;
   const G = has('A') + has('B'), H = has('C') + has('D'), I = has('E') + has('F');
   const groups = (G > 0 ? 1 : 0) + (H > 0 ? 1 : 0) + (I > 0 ? 1 : 0);
-  if (groups >= 2) return 'var(--green)';
+  if (groups === 0) return 'var(--red)';
   if (groups === 1) return 'var(--yellow)';
-  return 'var(--red)';
+  if (G === 1 && H === 1 && I === 0) return 'var(--green)';
+  return 'var(--blue)';
 }
 
 function renderCalendar() {
@@ -931,8 +1017,8 @@ function renderCalendar() {
   $('nav-prev').disabled = (viewYear === 2026 && viewMonth === 1);
   const grid = $('cal-grid');
   grid.innerHTML = '';
-  /* 周一开始 */
-  const first = (new Date(viewYear, viewMonth - 1, 1).getDay() + 6) % 7;
+  /* 周日开始（0=周日） */
+  const first = new Date(viewYear, viewMonth - 1, 1).getDay();
   const days = new Date(viewYear, viewMonth, 0).getDate();
   const today = new Date();
   const isThisMonth = today.getFullYear() === viewYear && today.getMonth() + 1 === viewMonth;
@@ -972,7 +1058,14 @@ function renderCalendar() {
         if (h) c.textContent = Array.from(h.name)[0] || '';
         return c;
       };
-      ['A', 'B', 'C', 'D'].forEach(k => row.appendChild(roleCell(k)));
+      const banDiv = () => { const d = document.createElement('i'); d.className = 'ban-div'; return d; };
+      /* 主播(A,B) | 中控(C,D) | 机动(E/F) を細い区切り線で分ける */
+      row.appendChild(roleCell('A'));
+      row.appendChild(roleCell('B'));
+      row.appendChild(banDiv());
+      row.appendChild(roleCell('C'));
+      row.appendChild(roleCell('D'));
+      row.appendChild(banDiv());
       const ef = document.createElement('span');
       ef.className = 'ef';
       ['E', 'F'].forEach(k => ef.appendChild(roleCell(k)));
@@ -1003,18 +1096,39 @@ function renderCalendar() {
 
 /* tap / longpress 判定 */
 function addPress(el, onTap, onLong) {
-  let timer = null, fired = false;
+  let timer = null, fired = false, moved = false, sx = 0, sy = 0;
   el.addEventListener('pointerdown', e => {
-    fired = false;
-    timer = setTimeout(() => { fired = true; onLong(); }, 550);
+    fired = false; moved = false; sx = e.clientX; sy = e.clientY;
+    timer = setTimeout(() => { if (!moved) { fired = true; onLong(); } }, 550);
+  });
+  el.addEventListener('pointermove', e => {
+    if (Math.abs(e.clientX - sx) > 10 || Math.abs(e.clientY - sy) > 10) {
+      moved = true; clearTimeout(timer);
+    }
   });
   el.addEventListener('pointerup', () => {
     clearTimeout(timer);
-    if (!fired) onTap();
+    if (!fired && !moved) onTap();   /* スワイプ中はタップ扱いしない */
   });
   el.addEventListener('pointerleave', () => clearTimeout(timer));
   el.addEventListener('pointercancel', () => clearTimeout(timer));
   el.addEventListener('contextmenu', e => e.preventDefault());
+}
+
+/* カレンダーを左右スワイプで前月・次月に切り替え */
+function setupCalendarSwipe() {
+  const grid = $('cal-grid');
+  let sx = null, sy = null;
+  grid.addEventListener('touchstart', e => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
+  grid.addEventListener('touchend', e => {
+    if (sx == null) return;
+    const dx = e.changedTouches[0].clientX - sx;
+    const dy = e.changedTouches[0].clientY - sy;
+    if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+      navMonth(dx < 0 ? 1 : -1);   /* 左へ→次月 / 右へ→前月 */
+    }
+    sx = sy = null;
+  });
 }
 
 /* ============================================================
@@ -1080,7 +1194,79 @@ function refreshOpenViews() {
   if (sheetDay != null && $('sheet-shift').classList.contains('open')) renderShiftRows();
   if (detailCtx && $('sheet-detail').classList.contains('open')) renderDetail();
   if ($('sheet-myshift').classList.contains('open')) renderMyShift();
-  if ($('sheet-admin').classList.contains('open')) { renderAdminUsers(); renderAdminShifts(); }
+  if ($('sheet-admin').classList.contains('open')) { renderAdminSlots(); renderAdminUsers(); renderAdminShifts(); }
+  if ($('sheet-rooms').classList.contains('open')) renderRoomPicker();
+}
+
+/* ============================================================
+   直播间 选择 / 管理（全用户可操作）
+   ============================================================ */
+function openRoomPicker() {
+  renderRoomPicker();
+  openSheet('sheet-rooms');
+}
+function renderRoomPicker() {
+  const wrap = $('room-list');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  const list = roomList();
+  if (!list.length) { wrap.innerHTML = '<p class="muted">暂无直播间</p>'; return; }
+  list.forEach(([rid, r]) => {
+    const row = document.createElement('div');
+    row.className = 'room-row' + (rid === currentRoomId ? ' active' : '');
+    const nm = document.createElement('div');
+    nm.className = 'rn';
+    nm.innerHTML = `${rid === currentRoomId ? '✓ ' : ''}${esc(r.name)}`;
+    nm.onclick = () => switchRoom(rid);
+    row.appendChild(nm);
+    const rename = document.createElement('button');
+    rename.className = 'btn small ghost';
+    rename.textContent = '改名';
+    rename.onclick = () => renameRoom(rid, r.name);
+    row.appendChild(rename);
+    const del = document.createElement('button');
+    del.className = 'btn small danger';
+    del.textContent = '删除';
+    del.onclick = () => deleteRoom(rid, r.name);
+    row.appendChild(del);
+    wrap.appendChild(row);
+  });
+}
+async function addRoom() {
+  const name = $('new-room-name').value.trim();
+  const err = $('room-err');
+  err.textContent = '';
+  if (!name) { err.textContent = '请输入直播间名称'; return; }
+  /* 未使用の roomId を採番 */
+  const used = new Set(Object.keys(rooms || {}));
+  let rid = null;
+  for (let n = 1; n <= 999; n++) { if (!used.has('room' + n)) { rid = 'room' + n; break; } }
+  if (!rid) { err.textContent = '直播间数已达上限'; return; }
+  const order = roomList().length + 1;
+  await DB.set('rooms/' + rid, { name, order, createdAt: Date.now() });
+  await DB.set('slots/' + rid, JSON.parse(JSON.stringify(DEFAULT_SLOTS)));
+  $('new-room-name').value = '';
+  switchRoom(rid);   /* 追加後すぐ切り替え */
+  openRoomPicker();
+}
+async function renameRoom(rid, oldName) {
+  const name = prompt('修改直播间名称：', oldName);
+  if (name == null) return;
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  await DB.set('rooms/' + rid + '/name', trimmed);
+  updateRoomUI(); renderRoomPicker();
+}
+async function deleteRoom(rid, name) {
+  if (roomList().length <= 1) { alert('至少需要保留一个直播间'); return; }
+  if (!confirm(`确定删除直播间「${name}」吗？\n该直播间的全部排班数据将一同删除（不可恢复）。`)) return;
+  await DB.remove('rooms/' + rid);
+  await DB.remove('slots/' + rid);
+  await DB.remove('shifts/' + rid);
+  if (rid === currentRoomId) {
+    currentRoomId = null;   /* subscribeRooms の watch が次のルームへ自動切替 */
+  }
+  renderRoomPicker();
 }
 
 /* ============================================================
@@ -1243,25 +1429,38 @@ function openMyShift() {
   openSheet('sheet-myshift');
 }
 
-function renderMyShift() {
+async function renderMyShift() {
+  if (!currentUser) return;
   $('myshift-title').textContent = `我的班表 · ${viewYear}年${viewMonth}月`;
   const body = $('myshift-body');
-  body.innerHTML = '';
+  body.innerHTML = '<p class="muted" style="text-align:center;padding:30px 0;">加载中…</p>';
+  /* 全直播间を横断して自分のシフトを集める */
   const items = [];
-  entriesOf(monthData).forEach(([dayStr, dayData]) => {
-    const day = parseInt(dayStr, 10);
-    if (!day || !dayData) return;
-    slotList().forEach(([slotId, s]) => {
-      const slot = dayData[slotId];
-      if (!slot) return;
-      ROLES.forEach(r => {
-        if (slot[r.key] && slot[r.key].id === currentUser.id) {
-          items.push({ day, slotId, roleKey: r.key, roleLabel: r.label, slotLabel: banLabel(s) });
-        }
+  const rl = roomList();
+  for (const [rid, room] of rl) {
+    const mData = await DB.get(`shifts/${rid}/${viewYear}/${viewMonth}`);
+    if (!mData) continue;
+    let rSlots = await DB.get(`slots/${rid}`);
+    if (!rSlots) rSlots = DEFAULT_SLOTS;
+    const rSlotList = entriesOf(rSlots).sort((a, b) => (a[1].order || 0) - (b[1].order || 0));
+    rSlotList.forEach(([slotId, s]) => {
+      entriesOf(mData).forEach(([dayStr, dayData]) => {
+        const day = parseInt(dayStr, 10);
+        if (!day || !dayData || !dayData[slotId]) return;
+        const slot = dayData[slotId];
+        ROLES.forEach(role => {
+          if (slot[role.key] && slot[role.key].id === currentUser.id) {
+            items.push({ roomId: rid, roomName: room.name || '直播间', day, slotId,
+              slotOrder: s.order || 0, slotLabel: `${s.order}班 ${s.time}`,
+              roleKey: role.key, roleLabel: role.label });
+          }
+        });
       });
     });
-  });
-  items.sort((a, b) => a.day - b.day || (slots[a.slotId].order - slots[b.slotId].order));
+  }
+  items.sort((a, b) => a.day - b.day || (a.slotOrder - b.slotOrder) ||
+    (a.roomName > b.roomName ? 1 : a.roomName < b.roomName ? -1 : 0));
+  body.innerHTML = '';
   if (!items.length) {
     body.innerHTML = '<p class="muted" style="text-align:center;padding:30px 0;">本月暂无班次</p>';
     return;
@@ -1269,11 +1468,16 @@ function renderMyShift() {
   items.forEach(it => {
     const r = document.createElement('div');
     r.className = 'ms-row';
-    r.innerHTML = `<span class="d">${viewMonth}/${it.day}</span><span class="t">${esc(it.slotLabel)}</span><span class="r">${it.roleLabel}</span>`;
+    r.innerHTML = `<span class="d">${viewMonth}/${it.day}</span>` +
+      `<span class="t"><span class="ms-room">📺${esc(it.roomName)}</span>${esc(it.slotLabel)}</span>` +
+      `<span class="r">${it.roleLabel}</span>`;
     const del = document.createElement('button');
     del.className = 'btn small danger';
     del.textContent = '删除';
-    del.onclick = () => DB.remove(`${monthPath()}/${it.day}/${it.slotId}/${it.roleKey}`);
+    del.onclick = async () => {
+      await DB.remove(`shifts/${it.roomId}/${viewYear}/${viewMonth}/${it.day}/${it.slotId}/${it.roleKey}`);
+      renderMyShift();
+    };
     r.appendChild(del);
     body.appendChild(r);
   });
@@ -1291,6 +1495,8 @@ function openAdmin() {
 
 function renderAdminSlots() {
   const wrap = $('adm-slots');
+  const roomLbl = $('adm-slot-room');
+  if (roomLbl) roomLbl.textContent = currentRoomName();
   wrap.innerHTML = '';
   slotList().forEach(([slotId, s], idx) => {
     const row = document.createElement('div');
@@ -1327,7 +1533,7 @@ async function saveSlots() {
   entries.sort((a, b) => timeToMinutes(a[1].time) - timeToMinutes(b[1].time));
   const newSlots = {};
   entries.forEach(([id, s], i) => { newSlots[id] = { order: i + 1, time: s.time }; });
-  await DB.set('slots', newSlots);
+  await DB.set(slotsPath(), newSlots);
   if ($('sheet-admin').classList.contains('open')) renderAdminSlots();
   $('adm-slots-msg').textContent = ' 已保存（按开始时间排序）✓';
   setTimeout(() => { $('adm-slots-msg').textContent = ''; }, 2500);
@@ -1357,7 +1563,7 @@ async function adminAddSlot() {
   const sorted = Object.entries(editing).sort((a, b) => timeToMinutes(a[1].time) - timeToMinutes(b[1].time));
   const newSlots = {};
   sorted.forEach(([id, s], i) => { newSlots[id] = { order: i + 1, time: s.time }; });
-  await DB.set('slots', newSlots);
+  await DB.set(slotsPath(), newSlots);
   if ($('sheet-admin').classList.contains('open')) renderAdminSlots();
   $('adm-slots-msg').textContent = ' 已添加新班次（修改时间后保存即可重排）✓';
   setTimeout(() => { $('adm-slots-msg').textContent = ''; }, 3000);
@@ -1384,6 +1590,7 @@ async function adminDeleteSlot(slotId, displayOrder) {
     slotId,
     slot: slotSnapshot,
     shiftData: shiftSnapshot,
+    roomId: currentRoomId,
     monthY: viewYear,
     monthM: viewMonth,
     displayOrder,
@@ -1400,7 +1607,7 @@ async function adminDeleteSlot(slotId, displayOrder) {
   list.filter(([id]) => id !== slotId).forEach(([id], i) => {
     ordered[id] = { order: i + 1, time: editing[id] ? editing[id].time : slots[id].time };
   });
-  await DB.set('slots', ordered);
+  await DB.set(slotsPath(), ordered);
   /* 当月のこの slotId に紐づく班表データを全日から削除 */
   const days = entriesOf(monthData);
   for (const [day] of days) {
@@ -1432,7 +1639,7 @@ function showUndoToast(text) {
 
 async function undoDeleteSlot() {
   if (!lastDeletedSlot) return;
-  const { slotId, slot, shiftData, monthY, monthM } = lastDeletedSlot;
+  const { slotId, slot, shiftData, roomId, monthY, monthM } = lastDeletedSlot;
   /* 1) 班次を復元 → 開始時間で再ソート */
   const editing = {};
   slotList().forEach(([id, s]) => { editing[id] = { time: s.time }; });
@@ -1440,10 +1647,10 @@ async function undoDeleteSlot() {
   const sorted = Object.entries(editing).sort((a, b) => timeToMinutes(a[1].time) - timeToMinutes(b[1].time));
   const newSlots = {};
   sorted.forEach(([id, s], i) => { newSlots[id] = { order: i + 1, time: s.time }; });
-  await DB.set('slots', newSlots);
+  await DB.set(slotsPath(), newSlots);
   /* 2) シフトデータを復元 */
   for (const [day, data] of Object.entries(shiftData)) {
-    await DB.set(`shifts/${monthY}/${monthM}/${day}/${slotId}`, data);
+    await DB.set(`shifts/${roomId}/${monthY}/${monthM}/${day}/${slotId}`, data);
   }
   /* 後片付け */
   lastDeletedSlot = null;
@@ -1462,7 +1669,7 @@ async function renderAdminUsers() {
   list.forEach(([uid, u]) => {
     const row = document.createElement('div');
     row.className = 'adm-user';
-    row.innerHTML = `<div class="ui"><b>${esc(u.name)}</b><small>ID: ${esc(u.id)}　生日: ${esc(u.birth || '-')}</small></div>`;
+    row.innerHTML = `<div class="ui"><b>${u.seq != null ? '#' + u.seq + ' ' : ''}${esc(u.name)}</b><small>ID: ${esc(u.id)}　生日: ${esc(u.birth || '-')}</small></div>`;
     const del = document.createElement('button');
     del.className = 'btn small danger';
     del.textContent = '删除';
@@ -1489,7 +1696,8 @@ async function adminAddUser() {
   if (!/^\d{8}$/.test(birth)) { err.textContent = '生日格式 yyyymmdd'; return; }
   const exists = await DB.get(`users/${id}`);
   if (exists) { err.textContent = '该ID已存在'; return; }
-  await DB.set(`users/${id}`, { id, name, password: pw, birth, createdAt: Date.now() });
+  const seq = await nextUserSeq();
+  await DB.set(`users/${id}`, { id, name, password: pw, birth, seq, createdAt: Date.now() });
   ['au-id', 'au-name', 'au-pw', 'au-birth'].forEach(i => $(i).value = '');
   renderAdminUsers();
 }
@@ -1530,21 +1738,119 @@ function renderAdminShifts() {
 /* ============================================================
    启动：直接打开日历，未登录也可浏览
    ============================================================ */
-(function init() {
-  /* 始终显示日历画面 */
-  $('screen-calendar').classList.add('show');
-  /* 当前月份 */
-  const now = new Date();
-  viewYear = Math.max(now.getFullYear(), 2026);
-  viewMonth = now.getFullYear() >= 2026 ? now.getMonth() + 1 : 1;
-  /* 订阅班次时间和当月数据（无需登录） */
+const ROOM_KEY = 'pantera_room';
+
+/* 旧形式データ（ルーム無し）を最初のルームへ移行。
+   - /rooms が無ければ「1号直播间」を作成
+   - /rooms があっても order 欠落を補完
+   - 旧 /slots（sX 平置き）と旧 /shifts/{年}/... を最初のルーム配下へ移す
+   既に移行済みなら何も書き込まない（冪等） */
+async function migrateToRooms() {
+  let roomsVal = await DB.get('rooms');
+  let firstRoomId;
+  if (!roomsVal || !Object.keys(roomsVal).length) {
+    firstRoomId = 'room1';
+    await DB.set('rooms/' + firstRoomId, { name: '1号直播间', order: 1, createdAt: Date.now() });
+  } else {
+    const list = entriesOf(roomsVal).sort((a, b) =>
+      ((a[1].order || 0) - (b[1].order || 0)) || (a[0] > b[0] ? 1 : -1));
+    firstRoomId = list[0][0];
+    /* order 欠落（手動作成ルーム）を補完 */
+    let i = 1;
+    for (const [rid, r] of list) { if (r.order == null) await DB.set('rooms/' + rid + '/order', i); i++; }
+  }
+  /* 旧 slots（sX 平置き）→ slots/firstRoom */
+  const oldSlots = await DB.get('slots');
+  if (oldSlots) {
+    const flat = {};
+    Object.entries(oldSlots).forEach(([k, v]) => { if (/^s\d+$/.test(k)) flat[k] = v; });
+    if (Object.keys(flat).length) {
+      const target = await DB.get('slots/' + firstRoomId);
+      if (!target || !Object.keys(target).length) await DB.set('slots/' + firstRoomId, flat);
+      for (const k of Object.keys(flat)) await DB.remove('slots/' + k);
+    }
+  }
+  /* 旧 shifts/{年}/... → shifts/firstRoom/{年}/...（既存はマージ、重複は上書きしない） */
+  const oldShifts = await DB.get('shifts');
+  if (oldShifts) {
+    for (const [yk, yv] of Object.entries(oldShifts)) {
+      if (!/^\d{4}$/.test(yk)) continue;
+      const existing = await DB.get(`shifts/${firstRoomId}/${yk}`);
+      if (!existing) {
+        await DB.set(`shifts/${firstRoomId}/${yk}`, yv);
+      } else {
+        for (const [mk, mv] of Object.entries(yv)) {
+          const em = await DB.get(`shifts/${firstRoomId}/${yk}/${mk}`);
+          if (!em) await DB.set(`shifts/${firstRoomId}/${yk}/${mk}`, mv);
+        }
+      }
+      await DB.remove(`shifts/${yk}`);
+    }
+  }
+}
+
+/* 既存ユーザーに通し番号(seq)を後付け */
+async function backfillUserSeq() {
+  const users = await DB.get('users');
+  const list = entriesOf(users);
+  let maxSeq = 0;
+  list.forEach(([, u]) => { if (typeof u.seq === 'number' && u.seq > maxSeq) maxSeq = u.seq; });
+  for (const [uid, u] of list) {
+    if (typeof u.seq !== 'number') { maxSeq += 1; await DB.set('users/' + uid + '/seq', maxSeq); }
+  }
+}
+async function nextUserSeq() {
+  const users = await DB.get('users');
+  let maxSeq = 0;
+  entriesOf(users).forEach(([, u]) => { if (typeof u.seq === 'number' && u.seq > maxSeq) maxSeq = u.seq; });
+  return maxSeq + 1;
+}
+
+function subscribeRooms() {
+  if (unsubRooms) unsubRooms();
+  unsubRooms = DB.watch('rooms', val => {
+    rooms = val || {};
+    const ids = roomList().map(([id]) => id);
+    if (!currentRoomId || !ids.includes(currentRoomId)) {
+      const saved = localStorage.getItem(ROOM_KEY);
+      currentRoomId = (saved && ids.includes(saved)) ? saved : ids[0];
+      if (currentRoomId) {
+        localStorage.setItem(ROOM_KEY, currentRoomId);
+        subscribeSlots(); subscribeMonth();
+      }
+    }
+    updateRoomUI(); renderRoomPicker();
+  });
+}
+function subscribeSlots() {
   if (unsubSlots) unsubSlots();
-  unsubSlots = DB.watch('slots', val => {
+  unsubSlots = DB.watch(slotsPath(), val => {
     slots = val || JSON.parse(JSON.stringify(DEFAULT_SLOTS));
     renderBanLegend(); renderCalendar(); refreshOpenViews();
   });
-  subscribeMonth();
-  /* 会话恢复（30分以内有效） */
+}
+function switchRoom(rid) {
+  if (!rid || rid === currentRoomId) { closeSheet('sheet-rooms'); return; }
+  currentRoomId = rid;
+  localStorage.setItem(ROOM_KEY, rid);
+  closeAllSheets();
+  subscribeSlots(); subscribeMonth();
+  updateRoomUI();
+}
+function updateRoomUI() {
+  const btn = $('room-switch');
+  if (btn) btn.textContent = '📺 ' + currentRoomName();
+}
+
+(async function init() {
+  $('screen-calendar').classList.add('show');
+  const now = new Date();
+  viewYear = Math.max(now.getFullYear(), 2026);
+  viewMonth = now.getFullYear() >= 2026 ? now.getMonth() + 1 : 1;
+  await migrateToRooms();
+  await backfillUserSeq();
+  subscribeRooms();
+  setupCalendarSwipe();
   const savedUser = loadSession();
   if (savedUser) { enterApp(savedUser); return; }
   updateHeaderUI();
