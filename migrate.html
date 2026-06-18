@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pantera 数据迁移工具</title>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:-apple-system,"Segoe UI",sans-serif;background:#0e1014;color:#e6e8ec;padding:20px;line-height:1.5;}
+.wrap{max-width:760px;margin:0 auto;}
+h1{font-size:20px;margin-bottom:6px;color:#7fd1b9;}
+.sub{color:#8a93a3;font-size:13px;margin-bottom:18px;}
+.card{background:#171a21;border:1px solid #262b36;border-radius:10px;padding:16px;margin-bottom:16px;}
+.step{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+.num{width:26px;height:26px;border-radius:50%;background:#262b36;color:#9aa4b2;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0;}
+.num.done{background:#1f6f54;color:#cdeee0;}
+button{border:none;border-radius:8px;padding:10px 16px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;}
+button:disabled{opacity:.4;cursor:not-allowed;}
+.b1{background:#3a6ea5;color:#fff;}
+.b2{background:#caa64a;color:#1a1a1a;}
+.b3{background:#b0413a;color:#fff;}
+.muted{color:#8a93a3;font-size:12px;margin-top:6px;}
+pre{background:#0b0d11;border:1px solid #262b36;border-radius:8px;padding:12px;font-size:12px;white-space:pre-wrap;word-break:break-all;max-height:340px;overflow:auto;margin-top:10px;color:#b8c2d0;}
+.plan-item{font-size:12px;padding:4px 0;border-bottom:1px solid #1c212b;}
+.plan-item .arrow{color:#7fd1b9;}
+.tag{display:inline-block;background:#262b36;color:#9aa4b2;border-radius:4px;padding:0 6px;font-size:11px;margin-right:6px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>📦 Pantera 数据迁移工具</h1>
+  <div class="sub">把旧结构（<code>shifts/…</code> · <code>slots/…</code>）安全迁移到新结构 <code>rooms/{roomId}/…</code> 下。users / notifications 不迁移（保持共享）。</div>
+
+  <div class="card">
+    <div class="step"><span class="num" id="n1">1</span><b>扫描（只读，不改动任何数据）</b></div>
+    <button class="b1" onclick="doScan()">开始扫描</button>
+    <div class="muted">读取旧数据并列出将要复制的内容，不会写入。</div>
+    <div id="plan"></div>
+  </div>
+
+  <div class="card">
+    <div class="step"><span class="num" id="n2">2</span><b>复制执行（旧数据保留不删）</b></div>
+    <button class="b2" id="btn-copy" onclick="doCopy()" disabled>复制到新结构</button>
+    <div class="muted">把旧数据复制到 <code>rooms/{roomId}/</code> 下。若目标已存在则跳过，不覆盖。</div>
+  </div>
+
+  <div class="card">
+    <div class="step"><span class="num" id="n3">3</span><b>删除旧数据（请先在前端确认显示正常）</b></div>
+    <button class="b3" id="btn-del" onclick="doDelete()" disabled>删除旧数据</button>
+    <div class="muted">不可恢复。请先打开 index.html 确认排班正常显示，再执行此步。</div>
+  </div>
+
+  <pre id="logbox">就绪。</pre>
+</div>
+
+<script>
+const firebaseConfig={databaseURL:"https://pantera-paibanbiao-default-rtdb.asia-southeast1.firebasedatabase.app"};
+firebase.initializeApp(firebaseConfig);
+const fdb=firebase.database();
+const DB={get:p=>fdb.ref(p).once('value').then(s=>s.val()),set:(p,v)=>fdb.ref(p).set(v),remove:p=>fdb.ref(p).remove()};
+const $=id=>document.getElementById(id);
+function log(s){const box=$('logbox');box.textContent+='\n'+s;box.scrollTop=box.scrollHeight;}
+function clearLog(){$('logbox').textContent='';}
+function entriesOf(x){return x?Object.entries(x).filter(([,v])=>v!=null):[];}
+
+let plan=[]; /* {from,to,type,roomId} */
+
+async function doScan(){
+  clearLog();plan=[];$('plan').innerHTML='';log('开始扫描…');
+  const shifts=await DB.get('shifts');
+  if(shifts){
+    for(const[k,v]of Object.entries(shifts)){
+      if(v==null)continue;
+      if(/^\d{4}$/.test(k)){ /* 很旧：shifts/{year} → rooms/iidabashi/shifts/{year} */
+        plan.push({from:`shifts/${k}`,to:`rooms/iidabashi/shifts/${k}`,type:'旧版排班(年)',roomId:'iidabashi'});
+      }else{ /* 现行：shifts/{roomId} → rooms/{roomId}/shifts */
+        plan.push({from:`shifts/${k}`,to:`rooms/${k}/shifts`,type:'排班(按直播间)',roomId:k});
+      }
+    }
+  }
+  const slots=await DB.get('slots');
+  if(slots){
+    const flat={};
+    for(const[k,v]of Object.entries(slots)){
+      if(v==null)continue;
+      if(/^s\d+$/.test(k))flat[k]=v; /* 很旧：slots/sX */
+      else plan.push({from:`slots/${k}`,to:`rooms/${k}/slots`,type:'班次(按直播间)',roomId:k}); /* slots/{roomId} */
+    }
+    if(Object.keys(flat).length)plan.push({from:'slots',to:'rooms/iidabashi/slots',type:'旧版班次',roomId:'iidabashi',onlyFlat:true});
+  }
+  if(!plan.length){log('未发现需要迁移的旧数据。可能已经迁移完成。');$('plan').innerHTML='<div class="muted">没有待迁移项目。</div>';return;}
+  $('plan').innerHTML=plan.map(p=>`<div class="plan-item"><span class="tag">${p.type}</span><code>${p.from}</code> <span class="arrow">→</span> <code>${p.to}</code></div>`).join('');
+  log(`扫描完成，发现 ${plan.length} 项可迁移。`);
+  $('n1').classList.add('done');$('btn-copy').disabled=false;
+}
+
+async function doCopy(){
+  if(!plan.length){log('请先扫描。');return;}
+  if(!confirm('确认把旧数据复制到新结构？（不会删除旧数据）'))return;
+  log('\n开始复制…');let ok=0,skip=0;
+  for(const p of plan){
+    try{
+      let val=await DB.get(p.from);
+      if(p.onlyFlat){const f={};for(const[k,v]of Object.entries(val||{}))if(/^s\d+$/.test(k))f[k]=v;val=f;}
+      const exist=await DB.get(p.to);
+      if(exist&&Object.keys(exist).length){log(`跳过（目标已存在）：${p.to}`);skip++;continue;}
+      await DB.set(p.to,val);
+      log(`已复制：${p.from} → ${p.to}`);ok++;
+    }catch(e){log(`失败：${p.from} （${e.message}）`);}
+  }
+  log(`\n复制完成：成功 ${ok}，跳过 ${skip}。`);
+  $('n2').classList.add('done');$('btn-del').disabled=false;
+}
+
+async function doDelete(){
+  if(!plan.length){log('请先扫描。');return;}
+  if(!confirm('⚠️ 第1次确认：删除旧数据后不可恢复。是否继续？'))return;
+  if(!confirm('⚠️ 第2次确认：请确保已在前端确认排班显示正常。真的删除旧数据吗？'))return;
+  log('\n开始删除旧数据…');let ok=0;
+  /* 仅删除明确的旧来源（top-level shifts 的迁移源、以及 slots 顶层 sX/roomId） */
+  for(const p of plan){
+    try{
+      if(p.onlyFlat){
+        const slots=await DB.get('slots');
+        for(const k of Object.keys(slots||{}))if(/^s\d+$/.test(k)){await DB.remove(`slots/${k}`);}
+        log('已删除旧版 slots/sX');
+      }else{
+        await DB.remove(p.from);log(`已删除：${p.from}`);
+      }
+      ok++;
+    }catch(e){log(`删除失败：${p.from} （${e.message}）`);}
+  }
+  log(`\n删除完成：${ok} 项。迁移结束。`);
+  $('n3').classList.add('done');
+}
+</script>
+</body>
+</html>
