@@ -9,7 +9,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-:root{--bg:#f7f4ee;--ink:#2b2a26;--gold:#b08d3d;--gold-d:#8c6f2f;--line:#e3ddd0;--card:#fffdf8;--green:#bfe6cf;--yellow:#f6e6b4;--red:#f1cccc;}
+:root{--bg:#f7f4ee;--ink:#2b2a26;--gold:#b08d3d;--gold-d:#8c6f2f;--line:#e3ddd0;--card:#fffdf8;--green:#bfe6cf;--yellow:#f6e6b4;--red:#f1cccc;--blue:#bcd3f5;}
 body{font-family:'Noto Sans SC',sans-serif;background:var(--bg);color:var(--ink);min-height:100vh;}
 .serif{font-family:'Noto Serif SC',serif;}
 /* login */
@@ -82,7 +82,7 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--bg);color:var(--ink)
   </div>
   <div class="note">如需调整班表，请联系管理员</div>
   <div class="navbar"><button id="prev" onclick="navMonth(-1)">‹</button><span class="mlabel" id="mlabel"></span><button onclick="navMonth(1)">›</button></div>
-  <div class="legend"><span><i style="background:var(--green)"></i>已齐</span><span><i style="background:var(--yellow)"></i>缺一方</span><span><i style="background:var(--red)"></i>无人</span></div>
+  <div class="legend"><span><i style="background:var(--green)"></i>已齐</span><span><i style="background:var(--blue)"></i>需协调</span><span><i style="background:var(--yellow)"></i>缺一方</span><span><i style="background:var(--red)"></i>无人</span></div>
   <div class="wk"><div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div></div>
   <div class="grid" id="grid"></div>
   <div class="foot">© Pantera 直播事务所 · 仅供查看</div>
@@ -97,7 +97,7 @@ body{font-family:'Noto Sans SC',sans-serif;background:var(--bg);color:var(--ink)
 <script>
 const firebaseConfig={databaseURL:"https://pantera-paibanbiao-default-rtdb.asia-southeast1.firebasedatabase.app"};
 const BASE=firebaseConfig.databaseURL;
-const ROLES=[{key:'A',label:'直播1',kind:'直播'},{key:'B',label:'直播2',kind:'直播'},{key:'C',label:'中控1',kind:'中控'},{key:'D',label:'中控2',kind:'中控'},{key:'E',label:'待机1',kind:'待机'},{key:'F',label:'待机2',kind:'待机'}];
+const ROLES=[{key:'A',label:'主播1',kind:'主播'},{key:'B',label:'主播2',kind:'主播'},{key:'C',label:'中控1',kind:'中控'},{key:'D',label:'中控2',kind:'中控'},{key:'E',label:'机动1',kind:'机动'},{key:'F',label:'机动2',kind:'机动'}];
 firebase.initializeApp(firebaseConfig);
 const fdb=firebase.database();
 const DB={get:p=>fdb.ref(p).once('value').then(s=>s.val()),set:(p,v)=>fdb.ref(p).set(v),raw:fdb};
@@ -149,7 +149,7 @@ function subscribeMonth(){
 }
 function navMonth(d){let y=viewYear,m=viewMonth+d;if(m<1){m=12;y--;}if(m>12){m=1;y++;}if(y<2026)return;viewYear=y;viewMonth=m;subscribeMonth();}
 function getSlot(day,slotId){const dd=monthData[day]||monthData[String(day)];return(dd&&dd[slotId])||null;}
-function color(day,slotId){const s=getSlot(day,slotId);const has=k=>(s&&s[k]&&s[k].id)?1:0;const G=has('A')+has('B'),H=has('C')+has('D'),I=has('E')+has('F');const g=(G>0?1:0)+(H>0?1:0)+(I>0?1:0);if(g>=2)return'var(--green)';if(g===1)return'var(--yellow)';return'var(--red)';}
+function color(day,slotId){const s=getSlot(day,slotId);const has=k=>(s&&s[k]&&s[k].id)?1:0;const G=has('A')+has('B'),H=has('C')+has('D'),I=has('E')+has('F');const g=(G>0?1:0)+(H>0?1:0)+(I>0?1:0);if(g===0)return'var(--red)';if(g===1)return'var(--yellow)';if(G===1&&H===1&&I===0)return'var(--green)';return'var(--blue)';}
 function render(){
   $('mlabel').textContent=`${viewYear}年${viewMonth}月`;$('prev').disabled=(viewYear===2026&&viewMonth===1);
   const grid=$('grid');grid.innerHTML='';

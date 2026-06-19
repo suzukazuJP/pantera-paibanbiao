@@ -10,7 +10,7 @@
 <style>
 :root{
   --bg:#ffffff;--card:#f5f5f5;--line:#e2e2e2;--ink:#1a1a1a;--text-dim:#888888;
-  --green:#a8e6c1;--yellow:#f9e4a0;--red:#f5a8a8;
+  --green:#a8e6c1;--yellow:#f9e4a0;--red:#f5a8a8;--blue:#a9c9f5;
   --ease:cubic-bezier(0.32,0.72,0,1);
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
@@ -79,6 +79,7 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
 .ban-row .rc.on{background:rgba(255,255,255,.6);}
 .ban-row .ef{flex:0.75;display:flex;flex-direction:column;gap:1px;min-width:0;}
 .ban-row .ef .rc{flex:1;font-size:6px;}
+.ban-row .ban-div{flex:0 0 1.5px;width:1.5px;align-self:stretch;background:rgba(0,0,0,.3);border-radius:0;}
 .ban-row .memoflag{position:absolute;top:0;right:0;font-size:7px;line-height:1;pointer-events:none;}
 #fab-myshift{position:fixed;right:14px;bottom:18px;z-index:20;border:none;border-radius:24px;padding:12px 20px;background:var(--ink);color:#fff;font-size:15px;font-weight:700;font-family:inherit;box-shadow:0 5px 16px rgba(0,0,0,.3),0 2px 0 #000;cursor:pointer;}
 #fab-myshift:active{transform:translateY(2px);filter:brightness(.8);}
@@ -203,11 +204,12 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
   <div id="month-nav"><button id="nav-prev" onclick="navMonth(-1)">‹</button><span id="month-label"></span><button onclick="navMonth(1)">›</button></div>
   <div id="cal-info">
     <div id="legend-left">
-      <div id="role-legend"><b>A</b><b>B</b><b>C</b><b>D</b><b>E/F</b><span>直播1</span><span>直播2</span><span>中控1</span><span>中控2</span><span>待机</span></div>
+      <div id="role-legend"><b>A</b><b>B</b><b>C</b><b>D</b><b>E/F</b><span>主播1</span><span>主播2</span><span>中控1</span><span>中控2</span><span>机动</span></div>
       <div id="ban-legend"></div>
     </div>
     <div id="color-legend">
-      <div>直播·中控已齐<i style="background:var(--green)"></i></div>
+      <div>主播·中控已齐<i style="background:var(--green)"></i></div>
+      <div>需协调<i style="background:var(--blue)"></i></div>
       <div>缺一方<i style="background:var(--yellow)"></i></div>
       <div>无人<i style="background:var(--red)"></i></div>
     </div>
@@ -265,7 +267,7 @@ const firebaseConfig = { databaseURL:"https://pantera-paibanbiao-default-rtdb.as
 const MASTER_ID="pantera", MASTER_PW="1205";
 const DEFAULT_SLOTS={s1:{order:1,time:"10:00〜12:00"},s2:{order:2,time:"15:00〜17:00"},s3:{order:3,time:"17:00〜19:00"},s4:{order:4,time:"20:00〜23:30"},s5:{order:5,time:"25:00〜27:00"}};
 const CIRCLED=["①","②","③","④","⑤","⑥","⑦","⑧","⑨"];
-const ROLES=[{key:'A',label:'直播1',group:'G'},{key:'B',label:'直播2',group:'G'},{key:'C',label:'中控1',group:'H'},{key:'D',label:'中控2',group:'H'},{key:'E',label:'待机1',group:'I'},{key:'F',label:'待机2',group:'I'}];
+const ROLES=[{key:'A',label:'主播1',group:'G'},{key:'B',label:'主播2',group:'G'},{key:'C',label:'中控1',group:'H'},{key:'D',label:'中控2',group:'H'},{key:'E',label:'机动1',group:'I'},{key:'F',label:'机动2',group:'I'}];
 const banName=s=>`${s.order}班`, banLabel=s=>`${s.order}班 ${s.time}`;
 
 const USE_MOCK=!firebaseConfig.databaseURL||/YOUR_/.test(firebaseConfig.databaseURL);
@@ -403,7 +405,7 @@ function navMonth(d){let y=viewYear,m=viewMonth+d;if(m<1){m=12;y--;}if(m>12){m=1
 
 /* ===== 日历 ===== */
 function renderBanLegend(){$('ban-legend').innerHTML=slotList().map(([,s])=>`<div>${CIRCLED[s.order-1]||s.order}${esc(s.time)}</div>`).join('');}
-function banRowColor(day,slotId){const s=getSlotData(day,slotId);const has=k=>(s&&s[k]&&s[k].id)?1:0;const G=has('A')+has('B'),H=has('C')+has('D'),I=has('E')+has('F');const groups=(G>0?1:0)+(H>0?1:0)+(I>0?1:0);if(groups>=2)return'var(--green)';if(groups===1)return'var(--yellow)';return'var(--red)';}
+function banRowColor(day,slotId){const s=getSlotData(day,slotId);const has=k=>(s&&s[k]&&s[k].id)?1:0;const G=has('A')+has('B'),H=has('C')+has('D'),I=has('E')+has('F');const groups=(G>0?1:0)+(H>0?1:0)+(I>0?1:0);if(groups===0)return'var(--red)';if(groups===1)return'var(--yellow)';if(G===1&&H===1&&I===0)return'var(--green)';return'var(--blue)';}
 function renderCalendar(){
   $('month-label').textContent=`${viewYear}年${viewMonth}月`;
   $('nav-prev').disabled=(viewYear===2026&&viewMonth===1);
@@ -422,7 +424,9 @@ function renderCalendar(){
       const row=document.createElement('div');row.className='ban-row';row.style.background=banRowColor(day,slotId);
       const slot=getSlotData(day,slotId);
       const roleCell=k=>{const c=document.createElement('i');const h=(slot&&slot[k]&&slot[k].id)?slot[k]:null;c.className='rc'+(h?' on':'');if(h)c.textContent=Array.from(h.name)[0]||'';return c;};
-      ['A','B','C','D'].forEach(k=>row.appendChild(roleCell(k)));
+      const banDiv=()=>{const d=document.createElement('i');d.className='ban-div';return d;};
+      row.appendChild(roleCell('A'));row.appendChild(roleCell('B'));row.appendChild(banDiv());
+      row.appendChild(roleCell('C'));row.appendChild(roleCell('D'));row.appendChild(banDiv());
       const ef=document.createElement('span');ef.className='ef';['E','F'].forEach(k=>ef.appendChild(roleCell(k)));row.appendChild(ef);
       if(slot&&slot.memo){const fl=document.createElement('i');fl.className='memoflag';fl.textContent='❗️';row.appendChild(fl);}
       addPress(row,()=>openShiftSheet(day),()=>openDetail(day,slotId));
