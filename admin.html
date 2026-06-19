@@ -102,6 +102,7 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
     <button class="tab" data-tab="rt" onclick="switchTab('rt')">实时日志</button>
     <button class="tab" data-tab="overview" onclick="switchTab('overview')">班表总览</button>
     <button class="tab" data-tab="users" onclick="switchTab('users')">员工</button>
+    <button class="tab" data-tab="late" onclick="switchTab('late')">迟到统计</button>
     <button class="tab" data-tab="rooms" onclick="switchTab('rooms')">直播间管理</button>
   </div>
   <main>
@@ -137,6 +138,17 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
       <div class="toolbar"><input id="user-search" placeholder="姓名/ID搜索…" oninput="renderUsers()" style="flex:1;min-width:140px;"><button class="btn-s b-gray" onclick="loadUsers()">刷新</button></div>
       <div class="scroll" id="users-scroll"></div>
     </div>
+    <!-- late stats -->
+    <div class="panel" id="panel-late">
+      <div class="toolbar">
+        <button class="btn-s b-gray" onclick="lateNav(-1)">‹ 上月</button>
+        <b id="late-label" style="min-width:90px;text-align:center;"></b>
+        <button class="btn-s b-gray" onclick="lateNav(1)">下月 ›</button>
+        <input id="late-search" placeholder="姓名搜索…" oninput="renderLate()" style="flex:1;min-width:120px;">
+        <button class="btn-s b-gray" onclick="loadLate()">刷新</button>
+      </div>
+      <div class="scroll" id="late-scroll"></div>
+    </div>
     <!-- rooms -->
     <div class="panel" id="panel-rooms"><div class="scroll" id="rooms-scroll"></div></div>
   </main>
@@ -162,7 +174,7 @@ async function logEvent(roomId,ev){try{const ts=Date.now();const key=(9999999999
     action:ev.action||'',target:ev.target||'',before:ev.before==null?'':ev.before,after:ev.after==null?'':ev.after},ev.targetUser?{targetUser:ev.targetUser}:{});
   await DB.set(`rooms/${roomId}/logs/${key}`,rec);}catch(e){}}
 
-const ACT={create:['登记','#2e7d52'],delete:['删除','#b0413a'],memo:['备注','#7a6f2e'],login:['登录','#3a6ea5'],logout:['退出','#555c68'],register:['注册','#2e7d52'],slot_save:['班次保存','#3a6ea5'],slot_add:['新增班次','#3a6ea5'],slot_delete:['删除班次','#b0413a'],user_add:['添加员工','#2e7d52'],user_delete:['删除员工','#b0413a'],owner_set:['设置商家','#6a4ea5'],owner_delete:['删除商家','#b0413a']};
+const ACT={create:['登记','#2e7d52'],delete:['删除','#b0413a'],memo:['备注','#7a6f2e'],checkin:['打卡','#1f8b6e'],login:['登录','#3a6ea5'],logout:['退出','#555c68'],register:['注册','#2e7d52'],slot_save:['班次保存','#3a6ea5'],slot_add:['新增班次','#3a6ea5'],slot_delete:['删除班次','#b0413a'],user_add:['添加员工','#2e7d52'],user_delete:['删除员工','#b0413a'],owner_set:['设置商家','#6a4ea5'],owner_delete:['删除商家','#b0413a']};
 function actLabel(a){return(ACT[a]||[a,'#555'])[0];}
 function actColor(a){return(ACT[a]||[a,'#555'])[1];}
 function actorLabel(t){return({master:'管理员',staff:'员工',owner:'商家'})[t]||t||'';}
@@ -203,7 +215,48 @@ function switchTab(t){
   else if(t==='rt')startRealtime();
   else if(t==='overview')loadOverview();
   else if(t==='users')loadUsers();
+  else if(t==='late')loadLate();
   else if(t==='rooms')renderRooms();
+}
+
+/* ===== 迟到统计 ===== */
+function timeToMinutes(t){if(!t||typeof t!=='string')return 99999;const m=t.match(/(\d{1,2}):(\d{2})/);if(!m)return 99999;return parseInt(m[1],10)*60+parseInt(m[2],10);}
+function shiftStartTs(y,mo,d,time){return new Date(y,mo-1,d).getTime()+timeToMinutes(time)*60000;}
+let lateYear=2026,lateMonth=6,lateRows=[];
+function lateNav(d){let y=lateYear,m=lateMonth+d;if(m<1){m=12;y--;}if(m>12){m=1;y++;}if(y<2026)return;lateYear=y;lateMonth=m;loadLate();}
+async function loadLate(){
+  $('late-label').textContent=`${lateYear}年${lateMonth}月`;$('late-scroll').innerHTML='<p class="muted">加载中…</p>';
+  const rows=[];
+  for(const rid of scopeRoomIds()){
+    const md=await DB.get(`rooms/${rid}/shifts/${lateYear}/${lateMonth}`);if(!md)continue;
+    let sl=await DB.get(`rooms/${rid}/slots`);sl=sl||{};
+    entriesOf(md).forEach(([dayStr,dd])=>{const day=parseInt(dayStr,10);if(!day||!dd)return;
+      Object.entries(dd).forEach(([slotId,slot])=>{if(slotId==='memo'||!slot)return;const s=sl[slotId]||{order:0,time:slotId};
+        ROLES.forEach(r=>{const h=slot[r.key];if(h&&h.id&&h.checkIn){const startTs=shiftStartTs(lateYear,lateMonth,day,s.time);const min=Math.max(0,Math.round((h.checkIn-startTs)/60000));const late=h.checkIn>startTs;
+          rows.push({room:(rooms[rid]||{}).name||rid,day,order:s.order||0,slot:`${s.order||''}班 ${s.time||''}`,role:r.label,name:h.name,checkIn:h.checkIn,late,min});}});});});
+  }
+  lateRows=rows;renderLate();
+}
+function lateHHMM(ts){const d=new Date(ts);return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');}
+function renderLate(){
+  const kw=($('late-search').value||'').trim().toLowerCase();
+  let list=lateRows.filter(r=>!kw||(r.name||'').toLowerCase().includes(kw));
+  const sum={};list.forEach(r=>{const k=r.name;if(!sum[k])sum[k]={name:r.name,lateCount:0,lateMin:0,total:0};sum[k].total++;if(r.late){sum[k].lateCount++;sum[k].lateMin+=r.min;}});
+  const sums=Object.values(sum).sort((a,b)=>b.lateMin-a.lateMin||b.lateCount-a.lateCount);
+  const showRoom=scope==='all';
+  let h='';
+  h+=`<h4 style="color:var(--accent);font-size:13px;margin:4px 0 8px;">个人迟到汇总（${lateMonth}月）</h4>`;
+  h+=`<table><thead><tr><th>姓名</th><th>打卡次数</th><th>迟到次数</th><th>迟到合计(分)</th></tr></thead><tbody>`;
+  if(!sums.length)h+=`<tr><td colspan="4" class="muted">本月暂无打卡记录</td></tr>`;
+  sums.forEach(s=>{h+=`<tr><td>${esc(s.name)}</td><td>${s.total}</td><td style="color:${s.lateCount?'#e08a8a':'inherit'}">${s.lateCount}</td><td style="color:${s.lateMin?'#e08a8a':'inherit'}">${s.lateMin}</td></tr>`;});
+  h+=`</tbody></table>`;
+  h+=`<h4 style="color:var(--accent);font-size:13px;margin:18px 0 8px;">打卡明细</h4>`;
+  list.sort((a,b)=>a.day-b.day||a.order-b.order);
+  h+=`<table><thead><tr>${showRoom?'<th>直播间</th>':''}<th>日期</th><th>班次</th><th>角色</th><th>姓名</th><th>打卡</th><th>迟到</th></tr></thead><tbody>`;
+  if(!list.length)h+=`<tr><td colspan="7" class="muted">无</td></tr>`;
+  list.forEach(r=>{h+=`<tr>${showRoom?`<td>${esc(r.room)}</td>`:''}<td>${lateMonth}/${r.day}</td><td>${esc(r.slot)}</td><td>${esc(r.role)}</td><td>${esc(r.name)}</td><td class="mono">${lateHHMM(r.checkIn)}</td><td style="color:${r.late?'#e08a8a':'#7fd1b9'}">${r.late?'迟到'+r.min+'分':'准时'}</td></tr>`;});
+  h+=`</tbody></table>`;
+  $('late-scroll').innerHTML=h;
 }
 
 /* ===== Tab1: 操作日志 ===== */

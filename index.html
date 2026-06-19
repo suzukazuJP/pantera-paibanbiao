@@ -115,6 +115,7 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
 .ms-row .d{font-weight:700;min-width:44px;}
 .ms-row .t{flex:1;min-width:0;}
 .ms-row .r{color:var(--text-dim);}
+.ms-row .ci{font-size:12px;}
 .adm-sec{margin-bottom:22px;}
 .adm-sec h4{font-size:14px;font-weight:700;margin-bottom:10px;border-bottom:1px solid var(--line);padding-bottom:5px;}
 .adm-slot{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
@@ -507,7 +508,8 @@ function renderDetail(){
   $('detail-title').textContent=`${viewMonth}月${day}日　${s.order?banLabel(s):''}`;
   const slot=getSlotData(day,slotId)||{};const body=$('detail-body');body.innerHTML='';
   ROLES.forEach(r=>{const holder=slot[r.key]&&slot[r.key].id?slot[r.key]:null;const sec=document.createElement('div');sec.className='detail-sec';
-    const rr=document.createElement('div');rr.className='name-row';rr.innerHTML=`<span class="nm"><b>${r.label}</b>　${holder?esc(holder.name):'<span class="none">未登记</span>'}</span>`;
+    let ci='';if(holder&&holder.checkIn){const li=lateInfo(holder.checkIn,shiftStartTs(viewYear,viewMonth,day,s.time));ci=` <small style="color:${li&&li.late?'#c0392b':'#1a7a45'}">✓${hhmm(holder.checkIn)}${li&&li.late?` 迟到${li.minutes}分`:''}</small>`;}
+    const rr=document.createElement('div');rr.className='name-row';rr.innerHTML=`<span class="nm"><b>${r.label}</b>　${holder?esc(holder.name)+ci:'<span class="none">未登记</span>'}</span>`;
     if(holder&&currentUser&&currentUser.isMaster){const del=document.createElement('button');del.className='btn small danger';del.textContent='删除';del.onclick=()=>masterDeleteShift(day,slotId,r.key,holder);rr.appendChild(del);}
     sec.appendChild(rr);body.appendChild(sec);});
   if(slot.memo){const m=document.createElement('div');m.className='detail-sec';m.innerHTML=`<h4 style="font-size:13px;color:var(--text-dim);margin-bottom:6px;">备注</h4><div class="detail-memo">${esc(slot.memo)}</div>`;body.appendChild(m);}
@@ -519,20 +521,38 @@ async function masterDeleteShift(day,slotId,roleKey,holder){
   logEvent(currentRoomId,{action:'delete',target:`${viewMonth}/${day} ${banName(s)} ${roleLbl}`,before:holder.name,after:'',targetUser:holder.id});
 }
 
+/* ===== 打卡 / 迟到 ===== */
+/* 班次开始时刻(ms)。深夜 25:00 等会自动滚到次日 */
+function shiftStartTs(year,month,day,slotTime){return new Date(year,month-1,day).getTime()+timeToMinutes(slotTime)*60000;}
+function lateInfo(checkIn,startTs){if(!checkIn)return null;const m=Math.round((checkIn-startTs)/60000);return{late:checkIn>startTs,minutes:Math.max(0,m)};}
+function hhmm(ts){const d=new Date(ts);return pad2(d.getHours())+':'+pad2(d.getMinutes());}
+async function doCheckIn(day,slotId,roleKey,time){
+  const ts=Date.now();
+  await DB.set(`${monthPath()}/${day}/${slotId}/${roleKey}/checkIn`,ts);
+  const s=slots[slotId]||{};const li=lateInfo(ts,shiftStartTs(viewYear,viewMonth,day,time));
+  logEvent(currentRoomId,{action:'checkin',target:`${viewMonth}/${day} ${banName(s)} ${(ROLES.find(r=>r.key===roleKey)||{}).label||roleKey}`,after:hhmm(ts)+(li&&li.late?` 迟到${li.minutes}分`:' 准时')});
+  renderMyShift();
+}
+
 /* ===== 我的班表 ===== */
 function openMyShift(){if(!requireAuth())return;renderMyShift();openSheet('sheet-myshift');}
 function renderMyShift(){
   if(!currentUser)return;$('myshift-title').textContent=`我的班表 · ${roomNameTxt()} ${viewYear}年${viewMonth}月`;
   const body=$('myshift-body');body.innerHTML='';const items=[];
   entriesOf(monthData).forEach(([dayStr,dayData])=>{const day=parseInt(dayStr,10);if(!day||!dayData)return;
-    slotList().forEach(([slotId,s])=>{const slot=dayData[slotId];if(!slot)return;ROLES.forEach(r=>{if(slot[r.key]&&slot[r.key].id===currentUser.id)items.push({day,slotId,roleKey:r.key,roleLabel:r.label,slotLabel:banLabel(s),order:s.order||0});});});});
+    slotList().forEach(([slotId,s])=>{const slot=dayData[slotId];if(!slot)return;ROLES.forEach(r=>{const h=slot[r.key];if(h&&h.id===currentUser.id)items.push({day,slotId,roleKey:r.key,roleLabel:r.label,slotLabel:banLabel(s),time:s.time,order:s.order||0,checkIn:h.checkIn||null});});});});
   items.sort((a,b)=>a.day-b.day||a.order-b.order);
   if(!items.length){body.innerHTML='<p class="muted" style="text-align:center;padding:30px 0;">本月暂无班次</p>';return;}
   items.forEach(it=>{const r=document.createElement('div');r.className='ms-row';
-    r.innerHTML=`<span class="d">${viewMonth}/${it.day}</span><span class="t">${esc(it.slotLabel)}</span><span class="r">${it.roleLabel}</span>`;
+    const li=lateInfo(it.checkIn,shiftStartTs(viewYear,viewMonth,it.day,it.time));
+    let ci='';
+    if(it.checkIn)ci=`<span class="ci">✓${hhmm(it.checkIn)} ${li&&li.late?`<b style="color:#c0392b">迟到${li.minutes}分</b>`:'<span style="color:#1a7a45">准时</span>'}</span>`;
+    r.innerHTML=`<span class="d">${viewMonth}/${it.day}</span><span class="t">${esc(it.slotLabel)}　<span style="color:var(--text-dim)">${it.roleLabel}</span><br>${ci}</span>`;
+    const btns=document.createElement('div');btns.style.cssText='display:flex;flex-direction:column;gap:4px;flex-shrink:0;';
+    if(!it.checkIn){const ck=document.createElement('button');ck.className='btn small';ck.textContent='打卡';ck.onclick=()=>doCheckIn(it.day,it.slotId,it.roleKey,it.time);btns.appendChild(ck);}
     const del=document.createElement('button');del.className='btn small danger';del.textContent='删除';
     del.onclick=async()=>{const s=slots[it.slotId]||{};await DB.remove(`${monthPath()}/${it.day}/${it.slotId}/${it.roleKey}`);logEvent(currentRoomId,{action:'delete',target:`${viewMonth}/${it.day} ${banName(s)} ${it.roleLabel}`,before:currentUser.name,after:''});};
-    r.appendChild(del);body.appendChild(r);});
+    btns.appendChild(del);r.appendChild(btns);body.appendChild(r);});
 }
 function roomNameTxt(){return $('room-name').textContent||'直播间';}
 
