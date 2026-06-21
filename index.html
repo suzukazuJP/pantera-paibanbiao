@@ -145,17 +145,16 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
 
 <div class="overlay" id="modal-register" style="z-index:88;"><div class="modal">
   <h2>注册新账号</h2>
-  <div class="field"><label>ID（字母/数字/_/-）</label><input id="reg-id" autocomplete="off"></div>
-  <div class="field"><label>姓名</label><input id="reg-name" autocomplete="off"></div>
+  <div class="field"><label>昵称</label><input id="reg-name" autocomplete="off"></div>
   <div class="field"><label>密码</label><input id="reg-pw" type="password" autocomplete="new-password"><button class="eye" data-eye="reg-pw"></button></div>
-  <div class="field"><label>出生日期（yyyymmdd）</label><input id="reg-birth" inputmode="numeric" maxlength="8" autocomplete="off"></div>
+  <div class="field"><label>生日（yyyymmdd · 请填写真实生日，防止一人多号）</label><input id="reg-birth" inputmode="numeric" maxlength="8" autocomplete="off"></div>
   <div class="err" id="reg-err"></div>
   <div class="row"><button class="btn ghost" onclick="closeModal('modal-register')">取消</button><button class="btn" onclick="doRegister()">注册</button></div>
 </div></div>
 
 <div class="overlay" id="modal-login" style="z-index:88;"><div class="modal">
   <h2>登录</h2>
-  <div class="field"><label>ID</label><input id="login-id" autocomplete="off"></div>
+  <div class="field"><label>昵称</label><input id="login-id" autocomplete="off"></div>
   <div class="field"><label>密码</label><input id="login-pw" type="password"><button class="eye" data-eye="login-pw"></button></div>
   <div class="err" id="login-err"></div>
   <div class="row"><button class="btn ghost" onclick="closeModal('modal-login')">取消</button><button class="btn" onclick="doLogin()">登录</button></div>
@@ -250,7 +249,7 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
     <div class="adm-sec">
       <h4>员工管理</h4>
       <div id="adm-users"></div>
-      <div class="adm-add"><input id="au-id" placeholder="ID"><input id="au-name" placeholder="姓名"><input id="au-pw" placeholder="密码"><input id="au-birth" placeholder="生日 yyyymmdd" inputmode="numeric" maxlength="8"></div>
+      <div class="adm-add"><input id="au-name" placeholder="昵称"><input id="au-pw" placeholder="密码"><input id="au-birth" placeholder="生日 yyyymmdd" inputmode="numeric" maxlength="8"></div>
       <button class="btn small" style="margin-top:8px;" onclick="adminAddUser()">添加员工</button>
       <span class="err" id="adm-user-err" style="display:inline-block;"></span>
     </div>
@@ -346,37 +345,38 @@ if(USE_MOCK)setSync('mock');else{setSync('connecting');try{DB.raw.ref('.info/con
 
 /* ===== 注册 / 登录 / Help ===== */
 async function doRegister(){
-  const id=$('reg-id').value.trim(),name=$('reg-name').value.trim(),pw=$('reg-pw').value,birth=$('reg-birth').value.trim(),err=$('reg-err');
+  const name=$('reg-name').value.trim(),pw=$('reg-pw').value,birth=$('reg-birth').value.trim(),err=$('reg-err');
   err.textContent='';
-  if(!id||!name||!pw||!birth){err.textContent='请填写所有项目';return;}
-  if(!/^[A-Za-z0-9_-]+$/.test(id)){err.textContent='ID只能包含字母、数字、_、-';return;}
-  if(id===MASTER_ID){err.textContent='该ID不可使用';return;}
-  if(!/^\d{8}$/.test(birth)){err.textContent='出生日期格式应为 yyyymmdd';return;}
-  if(await DB.get(`users/${id}`)){err.textContent='该ID已被注册';return;}
+  if(!name||!pw||!birth){err.textContent='请填写所有项目';return;}
+  if(name===MASTER_ID){err.textContent='该昵称不可使用';return;}
+  if(!/^\d{8}$/.test(birth)){err.textContent='生日格式应为 yyyymmdd';return;}
+  const users=await DB.get('users')||{};const arr=entriesOf(users);
+  if(arr.some(([,u])=>u.name===name)){err.textContent='该昵称已被使用';return;}
+  if(arr.some(([,u])=>u.birth===birth)){err.textContent='该生日已注册账号';return;}
   const uid='u_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
-  await DB.set(`users/${id}`,{uid,id,name,password:pw,birth,createdAt:Date.now()});
+  await DB.set(`users/${uid}`,{uid,name,password:pw,birth,createdAt:Date.now()});
   closeModal('modal-register');
-  const u={id,name,uid,isMaster:false};currentUser=u;
-  logEvent(currentRoomId,{action:'register',actorType:'staff',target:`员工 ${name}(${id})`,after:name});
+  const u={id:uid,name,uid,isMaster:false};currentUser=u;
+  logEvent(currentRoomId,{action:'register',actorType:'staff',target:`员工 ${name}`,after:name});
   enterApp(u);
 }
 async function doLogin(){
-  const id=$('login-id').value.trim(),pw=$('login-pw').value,err=$('login-err');err.textContent='';
-  if(!id||!pw){err.textContent='请输入ID和密码';return;}
-  if(id===MASTER_ID&&pw===MASTER_PW){closeModal('modal-login');const u={id:MASTER_ID,name:'管理员',isMaster:true};currentUser=u;logEvent(currentRoomId,{action:'login',actorType:'master',target:'管理员登录'});enterApp(u);return;}
-  const u=await DB.get(`users/${id}`);
-  if(!u||u.password!==pw){err.textContent='ID或密码错误';return;}
-  closeModal('modal-login');
-  const cu={id:u.id,name:u.name,uid:u.uid||u.id,isMaster:false};currentUser=cu;
+  const name=$('login-id').value.trim(),pw=$('login-pw').value,err=$('login-err');err.textContent='';
+  if(!name||!pw){err.textContent='请输入昵称和密码';return;}
+  if(name===MASTER_ID&&pw===MASTER_PW){closeModal('modal-login');const u={id:MASTER_ID,name:'管理员',isMaster:true};currentUser=u;logEvent(currentRoomId,{action:'login',actorType:'master',target:'管理员登录'});enterApp(u);return;}
+  const users=await DB.get('users');const hit=entriesOf(users).find(([,u])=>u.name===name&&u.password===pw);
+  if(!hit){err.textContent='昵称或密码错误';return;}
+  const u=hit[1];closeModal('modal-login');
+  const cu={id:u.uid||hit[0],name:u.name,uid:u.uid||hit[0],isMaster:false};currentUser=cu;
   logEvent(currentRoomId,{action:'login',actorType:'staff',target:`${u.name} 登录`});
   enterApp(cu);
 }
 async function doHelp(){
   const birth=$('help-birth').value.trim(),err=$('help-err'),res=$('help-result');err.textContent='';res.textContent='';
-  if(!/^\d{8}$/.test(birth)){err.textContent='出生日期格式应为 yyyymmdd';return;}
+  if(!/^\d{8}$/.test(birth)){err.textContent='生日格式应为 yyyymmdd';return;}
   const users=await DB.get('users');const hits=entriesOf(users).filter(([,u])=>u.birth===birth);
   if(!hits.length){err.textContent='未找到匹配的账号';return;}
-  res.innerHTML=hits.map(([,u])=>`ID：<b>${esc(u.id)}</b>　姓名：${esc(u.name)}`).join('<br>');
+  res.innerHTML=hits.map(([,u])=>`昵称：<b>${esc(u.name)}</b>　密码：<b>${esc(u.password)}</b>`).join('<br>');
 }
 
 /* ===== 会话 ===== */
@@ -595,15 +595,18 @@ async function undoDeleteSlot(){if(!lastDeletedSlot)return;const{slotId,slot,shi
 async function renderAdminUsers(){const wrap=$('adm-users');const users=await DB.get('users');wrap.innerHTML='';const list=entriesOf(users);
   if(!list.length){wrap.innerHTML='<p class="muted">暂无员工</p>';return;}
   list.forEach(([uid,u])=>{const row=document.createElement('div');row.className='adm-user';
-    row.innerHTML=`<div class="ui"><b>${esc(u.name)}</b><small>ID: ${esc(u.id)}　UID: ${esc(u.uid||'-')}　生日: ${esc(u.birth||'-')}</small></div>`;
+    row.innerHTML=`<div class="ui"><b>${esc(u.name)}</b><small>生日: ${esc(u.birth||'-')}　UID: ${esc(u.uid||'-')}</small></div>`;
     const del=document.createElement('button');del.className='btn small danger';del.textContent='删除';
-    del.onclick=async()=>{if(!confirm(`确定删除员工「${u.name}」吗？`))return;await DB.remove(`users/${uid}`);await DB.remove(`notifications/${uid}`);logEvent(currentRoomId,{action:'user_delete',target:`员工 ${u.name}(${u.id})`,targetUser:u.id});renderAdminUsers();};
+    del.onclick=async()=>{if(!confirm(`确定删除员工「${u.name}」吗？`))return;await DB.remove(`users/${uid}`);await DB.remove(`notifications/${uid}`);logEvent(currentRoomId,{action:'user_delete',target:`员工 ${u.name}`,targetUser:uid});renderAdminUsers();};
     row.appendChild(del);wrap.appendChild(row);});}
-async function adminAddUser(){const id=$('au-id').value.trim(),name=$('au-name').value.trim(),pw=$('au-pw').value,birth=$('au-birth').value.trim(),err=$('adm-user-err');err.textContent='';
-  if(!id||!name||!pw||!birth){err.textContent='请填写所有项目';return;}if(!/^[A-Za-z0-9_-]+$/.test(id)||id===MASTER_ID){err.textContent='ID不可用';return;}if(!/^\d{8}$/.test(birth)){err.textContent='生日格式 yyyymmdd';return;}
-  if(await DB.get(`users/${id}`)){err.textContent='该ID已存在';return;}const uid='u_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
-  await DB.set(`users/${id}`,{uid,id,name,password:pw,birth,createdAt:Date.now()});logEvent(currentRoomId,{action:'user_add',target:`员工 ${name}(${id})`,after:name,targetUser:id});
-  ['au-id','au-name','au-pw','au-birth'].forEach(i=>$(i).value='');renderAdminUsers();}
+async function adminAddUser(){const name=$('au-name').value.trim(),pw=$('au-pw').value,birth=$('au-birth').value.trim(),err=$('adm-user-err');err.textContent='';
+  if(!name||!pw||!birth){err.textContent='请填写所有项目';return;}if(name===MASTER_ID){err.textContent='该昵称不可用';return;}if(!/^\d{8}$/.test(birth)){err.textContent='生日格式 yyyymmdd';return;}
+  const users=await DB.get('users')||{};const arr=entriesOf(users);
+  if(arr.some(([,u])=>u.name===name)){err.textContent='该昵称已被使用';return;}
+  if(arr.some(([,u])=>u.birth===birth)){err.textContent='该生日已注册账号';return;}
+  const uid='u_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+  await DB.set(`users/${uid}`,{uid,name,password:pw,birth,createdAt:Date.now()});logEvent(currentRoomId,{action:'user_add',target:`员工 ${name}`,after:name,targetUser:uid});
+  ['au-name','au-pw','au-birth'].forEach(i=>$(i).value='');renderAdminUsers();}
 function renderAdminShifts(){$('adm-month-label').textContent=`${viewYear}年${viewMonth}月`;const wrap=$('adm-shifts');wrap.innerHTML='';const rows=[];
   entriesOf(monthData).forEach(([dayStr,dd])=>{const day=parseInt(dayStr,10);if(!day||!dd)return;slotList().forEach(([slotId,s])=>{const slot=dd[slotId];if(!slot)return;ROLES.forEach(r=>{const h=slot[r.key]&&slot[r.key].id?slot[r.key]:null;if(h)rows.push({day,slotId,slotLabel:banLabel(s),roleKey:r.key,roleLabel:r.label,h,order:s.order||0});});});});
   rows.sort((a,b)=>a.day-b.day||a.order-b.order);

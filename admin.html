@@ -137,7 +137,7 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
     </div>
     <!-- users -->
     <div class="panel" id="panel-users">
-      <div class="toolbar"><input id="user-search" placeholder="姓名/ID搜索…" oninput="renderUsers()" style="flex:1;min-width:140px;"><button class="btn-s b-gray" onclick="loadUsers()">刷新</button></div>
+      <div class="toolbar"><input id="user-search" placeholder="昵称/生日搜索…" oninput="renderUsers()" style="flex:1;min-width:140px;"><button class="btn-s b-gray" onclick="loadUsers()">刷新</button></div>
       <div class="scroll" id="users-scroll"></div>
     </div>
     <!-- late stats -->
@@ -363,12 +363,12 @@ async function loadUsers(){$('users-scroll').innerHTML='<p class="muted">加载�
 let userSort={key:'createdAt',dir:1};
 function renderUsers(){
   const kw=$('user-search').value.trim().toLowerCase();
-  let list=usersCache.filter(u=>!kw||((u.name||'')+' '+(u.id||'')).toLowerCase().includes(kw));
+  let list=usersCache.filter(u=>!kw||((u.name||'')+' '+(u.birth||'')).toLowerCase().includes(kw));
   list.sort((a,b)=>{const k=userSort.key;let v;if(k==='createdAt')v=(a.createdAt||0)-(b.createdAt||0);else v=((a[k]||'')>(b[k]||'')?1:(a[k]||'')<(b[k]||'')?-1:0);return v*userSort.dir;});
-  let h=`<table><thead><tr><th onclick="userSortBy('name')">姓名</th><th onclick="userSortBy('id')">登录ID</th><th onclick="userSortBy('uid')">UID</th><th onclick="userSortBy('birth')">生日</th><th onclick="userSortBy('createdAt')">注册时间</th></tr></thead><tbody>`;
-  if(!list.length)h+=`<tr><td colspan="5" class="muted">暂无员工</td></tr>`;
+  let h=`<table><thead><tr><th onclick="userSortBy('name')">昵称</th><th onclick="userSortBy('birth')">生日</th><th onclick="userSortBy('uid')">UID</th><th onclick="userSortBy('createdAt')">注册时间</th></tr></thead><tbody>`;
+  if(!list.length)h+=`<tr><td colspan="4" class="muted">暂无员工</td></tr>`;
   list.forEach(u=>{const dt=u.createdAt?new Date(u.createdAt):null;const dts=dt?`${dt.getFullYear()}-${pad2(dt.getMonth()+1)}-${pad2(dt.getDate())}`:'-';
-    h+=`<tr><td>${esc(u.name)}</td><td class="mono">${esc(u.id)}</td><td class="mono">${esc(u.uid||'-')}</td><td>${esc(u.birth||'-')}</td><td class="mono">${dts}</td></tr>`;});
+    h+=`<tr><td>${esc(u.name)}</td><td>${esc(u.birth||'-')}</td><td class="mono">${esc(u.uid||'-')}</td><td class="mono">${dts}</td></tr>`;});
   h+='</tbody></table>';$('users-scroll').innerHTML=h;
 }
 function userSortBy(k){if(userSort.key===k)userSort.dir*=-1;else{userSort.key=k;userSort.dir=1;}renderUsers();}
