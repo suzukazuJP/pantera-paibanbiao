@@ -143,7 +143,7 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
 <div id="sync-status"></div>
 <div id="undo-toast"><span id="undo-text"></span><span class="timer" id="undo-timer"></span><button onclick="undoDeleteSlot()">撤销</button></div>
 
-<div class="overlay" id="modal-register"><div class="modal">
+<div class="overlay" id="modal-register" style="z-index:88;"><div class="modal">
   <h2>注册新账号</h2>
   <div class="field"><label>ID（字母/数字/_/-）</label><input id="reg-id" autocomplete="off"></div>
   <div class="field"><label>姓名</label><input id="reg-name" autocomplete="off"></div>
@@ -153,7 +153,7 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
   <div class="row"><button class="btn ghost" onclick="closeModal('modal-register')">取消</button><button class="btn" onclick="doRegister()">注册</button></div>
 </div></div>
 
-<div class="overlay" id="modal-login"><div class="modal">
+<div class="overlay" id="modal-login" style="z-index:88;"><div class="modal">
   <h2>登录</h2>
   <div class="field"><label>ID</label><input id="login-id" autocomplete="off"></div>
   <div class="field"><label>密码</label><input id="login-pw" type="password"><button class="eye" data-eye="login-pw"></button></div>
