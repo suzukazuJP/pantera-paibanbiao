@@ -177,7 +177,7 @@ async function logEvent(roomId,ev){try{const ts=Date.now();const key=(9999999999
     action:ev.action||'',target:ev.target||'',before:ev.before==null?'':ev.before,after:ev.after==null?'':ev.after},ev.targetUser?{targetUser:ev.targetUser}:{});
   await DB.set(`rooms/${roomId}/logs/${key}`,rec);}catch(e){}}
 
-const ACT={create:['登记','#2e7d52'],delete:['删除','#b0413a'],memo:['备注','#7a6f2e'],checkin:['打卡','#1f8b6e'],login:['登录','#3a6ea5'],logout:['退出','#555c68'],register:['注册','#2e7d52'],slot_save:['班次保存','#3a6ea5'],slot_add:['新增班次','#3a6ea5'],slot_delete:['删除班次','#b0413a'],user_add:['添加员工','#2e7d52'],user_delete:['删除员工','#b0413a'],owner_set:['设置商家','#6a4ea5'],owner_delete:['删除商家','#b0413a']};
+const ACT={create:['登记','#2e7d52'],delete:['删除','#b0413a'],memo:['备注','#7a6f2e'],checkin:['打卡','#1f8b6e'],arrive:['到岗','#1f8b6e'],leave:['离岗','#8a94a2'],login:['登录','#3a6ea5'],logout:['退出','#555c68'],register:['注册','#2e7d52'],slot_save:['班次保存','#3a6ea5'],slot_add:['新增班次','#3a6ea5'],slot_delete:['删除班次','#b0413a'],user_add:['添加员工','#2e7d52'],user_delete:['删除员工','#b0413a'],owner_set:['设置商家','#6a4ea5'],owner_delete:['删除商家','#b0413a']};
 function actLabel(a){return(ACT[a]||[a,'#555'])[0];}
 function actColor(a){return(ACT[a]||[a,'#555'])[1];}
 function actorLabel(t){return({master:'管理员',staff:'员工',owner:'商家'})[t]||t||'';}
@@ -198,7 +198,7 @@ $('m-pw').addEventListener('keydown',e=>{if(e.key==='Enter')adminLogin();});
 async function listRoomIds(){try{const r=await fetch(BASE+'/rooms.json?shallow=true');const j=await r.json();return j?Object.keys(j):[];}catch(e){return[];}}
 async function loadRooms(){
   const ids=await listRoomIds();rooms={};
-  for(const id of ids){const name=await DB.get(`rooms/${id}/name`);const owner=await DB.get(`rooms/${id}/owner`);rooms[id]={name:name||id,owner:owner||null};}
+  for(const id of ids){const name=await DB.get(`rooms/${id}/name`);const owner=await DB.get(`rooms/${id}/owner`);const attendIp=await DB.get(`rooms/${id}/attendIp`);rooms[id]={name:name||id,owner:owner||null,attendIp:attendIp||''};}
   const sel=$('room-select');sel.innerHTML='<option value="all">全部直播间</option>'+Object.entries(rooms).map(([id,r])=>`<option value="${esc(id)}">${esc(r.name)}</option>`).join('');
   sel.value=scope;
 }
@@ -340,7 +340,9 @@ function startRealtime(){
 function appendRtLine(l){
   const box=$('rt-scroll');const div=document.createElement('div');div.className='rt-line';
   const roomTag=scope==='all'?`<span style="color:#7fd1b9">[${esc((rooms[l._room]||{}).name||l._room)}]</span>`:'';
-  div.innerHTML=`<span class="rt-time">${esc(l.time||'')}</span>${roomTag}<span style="color:${actColor(l.action)}">${actLabel(l.action)}</span><span>${esc(l.name||'-')}</span><span class="rt-uid">UID:${esc(l.uid||'-')}</span><span style="color:#9aa4b2">${esc(l.target||'')}</span>${(l.before||l.after)?`<span style="color:#7f8a99">${esc(l.before||'∅')}→${esc(l.after||'∅')}</span>`:''}`;
+  const _diff=(l.action==='arrive'&&l.after)?`<span style="margin-left:auto;font-weight:700;color:${/晚/.test(l.after)?'#e08a8a':'#7fd1b9'}">${esc(l.after)}</span>`:'';
+  const _chg=(l.action!=='arrive'&&(l.before||l.after))?`<span style="color:#7f8a99">${esc(l.before||'∅')}→${esc(l.after||'∅')}</span>`:'';
+  div.innerHTML=`<span class="rt-time">${esc(l.time||'')}</span>${roomTag}<span style="color:${actColor(l.action)}">${actLabel(l.action)}</span><span>${esc(l.name||'-')}</span><span class="rt-uid">UID:${esc(l.uid||'-')}</span><span style="color:#9aa4b2">${esc(l.target||'')}</span>${_chg}${_diff}`;
   box.appendChild(div);
   if(rtFollow)box.scrollTop=box.scrollHeight;
 }
@@ -418,11 +420,22 @@ function renderRooms(){
         <button class="btn-s b-gold" onclick="setOwner('${esc(id)}')">保存商家账号</button>
         ${ow.account?`<button class="btn-s b-red" onclick="delOwner('${esc(id)}')">删除商家账号</button>`:''}
       </div>
+      <div class="owner-box">
+        <div class="muted" style="margin-bottom:6px;">打卡网络IP（员工连此Wi-Fi时自动到岗/离岗）</div>
+        <input id="att-ip-${id}" placeholder="例：123.45.67.89" value="${esc(r.attendIp||'')}" style="margin-bottom:6px;">
+        <button class="btn-s b-blue" onclick="useCurrentIp('${esc(id)}')">使用当前IP</button>
+        <button class="btn-s b-gold" onclick="saveAttendIp('${esc(id)}')">保存IP</button>
+        ${r.attendIp?`<button class="btn-s b-red" onclick="clearAttendIp('${esc(id)}')">清空</button>`:''}
+      </div>
     </div>`;
   });
   $('rooms-scroll').innerHTML=h;
 }
 function copyUrl(u){navigator.clipboard.writeText(u).then(()=>alert('已复制：\n'+u)).catch(()=>prompt('复制以下链接：',u));}
+async function fetchMyIp(){try{const r=await fetch('https://api.ipify.org?format=json',{cache:'no-store'});const j=await r.json();return j&&j.ip;}catch(e){return null;}}
+async function useCurrentIp(id){const ip=await fetchMyIp();if(!ip){alert('获取当前IP失败，请重试');return;}$('att-ip-'+id).value=ip;}
+async function saveAttendIp(id){const ip=($('att-ip-'+id).value||'').trim();await DB.set(`rooms/${id}/attendIp`,ip||null);alert(ip?('已保存打卡IP：'+ip):'已清空打卡IP');await loadRooms();renderRooms();}
+async function clearAttendIp(id){if(!confirm('清空该直播间的打卡IP？'))return;await DB.remove(`rooms/${id}/attendIp`);await loadRooms();renderRooms();}
 async function addRoom(){
   const id=($('nr-id').value||'').trim(),name=($('nr-name').value||'').trim();
   if(!/^[A-Za-z0-9_-]+$/.test(id)){alert('直播间ID只能用英文/数字/_/-');return;}
