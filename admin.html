@@ -115,12 +115,13 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
         <select id="log-action" onchange="renderLogs()"><option value="">全部操作</option></select>
         <select id="log-actor" onchange="renderLogs()"><option value="">全部身份</option><option value="master">管理员</option><option value="staff">员工</option><option value="owner">商家</option></select>
         <button class="btn-s b-gray" onclick="loadLogs()">刷新</button>
+        <button class="btn-s b-red" onclick="clearLogs()">清空日志</button>
       </div>
       <div class="scroll" id="logs-scroll"><p class="muted">加载中…</p></div>
     </div>
     <!-- realtime -->
     <div class="panel" id="panel-rt">
-      <div class="toolbar"><span class="muted">实时日志（新事件自动追加到底部）</span><span class="sp" style="flex:1"></span><button class="btn-s b-gray" onclick="restartRealtime()">重连</button></div>
+      <div class="toolbar"><span class="muted">实时日志（新事件自动追加到底部）</span><span class="sp" style="flex:1"></span><button class="btn-s b-red" onclick="clearLogs()">清空日志</button><button class="btn-s b-gray" onclick="restartRealtime()">重连</button></div>
       <div id="rt-scroll"></div>
       <button id="rt-jump" onclick="rtFollowNow()">⬇ 回到最新</button>
     </div>
@@ -204,7 +205,7 @@ async function loadRooms(){
 async function startApp(){
   $('login').style.display='none';$('app').classList.add('show');
   const now=new Date();ovYear=Math.max(now.getFullYear(),2026);ovMonth=now.getFullYear()>=2026?now.getMonth()+1:6;
-  await loadRooms();onScopeChange();
+  await loadRooms();purgeOldLogs();onScopeChange();
 }
 function onScopeChange(){scope=$('room-select').value;$('scope-label').textContent=scope==='all'?'（全部直播间）':'（'+(rooms[scope]?rooms[scope].name:scope)+'）';
   const active=document.querySelector('.tab.active').dataset.tab;switchTab(active);}
@@ -240,6 +241,23 @@ async function loadLate(){
   lateRows=rows;renderLate();
 }
 function lateHHMM(ts){const d=new Date(ts);return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');}
+function lateDT(ts){const d=new Date(ts);return (d.getMonth()+1)+'/'+d.getDate()+' '+pad2(d.getHours())+':'+pad2(d.getMinutes());}
+/* 操作日志/实时日志（同一数据）の手動全消去 */
+async function clearLogs(){
+  const ids=scopeRoomIds();if(!ids.length){alert('没有可清空的直播间');return;}
+  const label=scope==='all'?'全部直播间':((rooms[scope]||{}).name||scope);
+  if(!confirm(`确定清空「${label}」的操作日志 / 实时日志吗？\n（两者数据相同，将一并清空，且不可恢复）`))return;
+  for(const rid of ids)await DB.remove(`rooms/${rid}/logs`);
+  alert('日志已清空');loadLogs();if(typeof restartRealtime==='function'&&$('panel-rt').classList.contains('show'))restartRealtime();
+}
+/* 90天以上前の日志を自動削除（控制台を開いた時に実行） */
+async function purgeOldLogs(){
+  const cutoff=Date.now()-90*24*60*60*1000;
+  try{const all=await DB.get('rooms');if(!all)return;
+    for(const rid of Object.keys(all)){const logs=all[rid]&&all[rid].logs;if(!logs)continue;
+      for(const k of Object.keys(logs)){const v=logs[k];if(v&&v.ts&&v.ts<cutoff)await DB.remove(`rooms/${rid}/logs/${k}`);}}
+  }catch(e){}
+}
 function renderLate(){
   const kw=($('late-search').value||'').trim().toLowerCase();
   let list=lateRows.filter(r=>!kw||(r.name||'').toLowerCase().includes(kw));
@@ -256,7 +274,7 @@ function renderLate(){
   list.sort((a,b)=>a.day-b.day||a.order-b.order);
   h+=`<table><thead><tr>${showRoom?'<th>直播间</th>':''}<th>日期</th><th>班次</th><th>角色</th><th>姓名</th><th>打卡</th><th>迟到</th></tr></thead><tbody>`;
   if(!list.length)h+=`<tr><td colspan="7" class="muted">无</td></tr>`;
-  list.forEach(r=>{h+=`<tr>${showRoom?`<td>${esc(r.room)}</td>`:''}<td>${lateMonth}/${r.day}</td><td>${esc(r.slot)}</td><td>${esc(r.role)}</td><td>${esc(r.name)}</td><td class="mono">${lateHHMM(r.checkIn)}</td><td style="color:${r.late?'#e08a8a':'#7fd1b9'}">${r.late?'迟到'+r.min+'分':'准时'}</td></tr>`;});
+  list.forEach(r=>{h+=`<tr>${showRoom?`<td>${esc(r.room)}</td>`:''}<td>${lateMonth}/${r.day}</td><td>${esc(r.slot)}</td><td>${esc(r.role)}</td><td>${esc(r.name)}</td><td class="mono">${lateDT(r.checkIn)}</td><td style="color:${r.late?'#e08a8a':'#7fd1b9'}">${r.late?'迟到'+r.min+'分':'准时'}</td></tr>`;});
   h+=`</tbody></table>`;
   $('late-scroll').innerHTML=h;
 }
