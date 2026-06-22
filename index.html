@@ -416,10 +416,27 @@ async function saveAccount(){
   if(name===MASTER_ID){err.textContent='该昵称不可使用';return;}
   const users=await DB.get('users')||{};
   if(entriesOf(users).some(([k,u])=>k!==_accUid&&u.name===name)){err.textContent='该昵称已被使用';return;}
+  const oldName=(users[_accUid]&&users[_accUid].name)||currentUser.name;
   await DB.set(`users/${_accUid}/name`,name);await DB.set(`users/${_accUid}/password`,pw);
+  let synced=0;
+  if(name!==oldName)synced=await propagateNameChange(_accUid,name);
   currentUser.name=name;saveSession(currentUser);updateHeaderUI();
-  logEvent(currentRoomId,{action:'edit',target:`${name} 修改了账号信息`});
-  closeModal('modal-account');showBanner('账号信息已更新');
+  logEvent(currentRoomId,{action:'edit',target:`${oldName} → ${name} 修改账号`+(synced?`（同步${synced}处排班）`:'')});
+  closeModal('modal-account');showBanner(synced?`账号信息已更新，已同步 ${synced} 处排班`:'账号信息已更新');
+  renderCalendar();refreshOpenViews();
+}
+async function propagateNameChange(uid,newName){
+  const base=`rooms/${currentRoomId}/shifts`;
+  const shifts=await DB.get(base);if(!shifts||typeof shifts!=='object')return 0;
+  const tasks=[];
+  for(const y of Object.keys(shifts)){const ys=shifts[y];if(!ys||typeof ys!=='object')continue;
+    for(const m of Object.keys(ys)){const ms=ys[m];if(!ms||typeof ms!=='object')continue;
+      for(const d of Object.keys(ms)){const ds=ms[d];if(!ds||typeof ds!=='object')continue;
+        for(const slotId of Object.keys(ds)){const slot=ds[slotId];if(!slot||typeof slot!=='object')continue;
+          ROLES.forEach(r=>{const h=slot[r.key];if(h&&h.id===uid&&h.name!==newName)tasks.push(`${base}/${y}/${m}/${d}/${slotId}/${r.key}/name`);});
+        }}}}
+  await Promise.all(tasks.map(p=>DB.set(p,newName)));
+  return tasks.length;
 }
 
 /* ===== 会话 ===== */
