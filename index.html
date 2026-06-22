@@ -64,9 +64,9 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
 #color-legend{font-size:9px;color:var(--text-dim);line-height:1.7;text-align:right;flex-shrink:0;}
 #color-legend div{display:flex;align-items:center;justify-content:flex-end;gap:4px;}
 #color-legend i{display:inline-block;width:9px;height:9px;border-radius:2px;flex-shrink:0;}
-#staff-bar{padding:0 8px 4px;display:flex;align-items:center;gap:6px;}
-#staff-bar .staff-toggle{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:3px 10px;font-size:10px;color:var(--text-dim);cursor:pointer;}
-#staff-list{display:none;flex-wrap:wrap;gap:4px;padding:2px 0;}
+#staff-bar{display:flex;flex-direction:column;align-items:center;gap:4px;align-self:flex-start;position:relative;}
+#staff-bar .staff-toggle{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:3px 10px;font-size:10px;color:var(--text-dim);cursor:pointer;white-space:nowrap;}
+#staff-list{display:none;position:absolute;top:calc(100% + 4px);left:50%;transform:translateX(-50%);flex-wrap:wrap;gap:4px;padding:7px;justify-content:center;width:150px;background:var(--bg);border:1px solid var(--line);border-radius:8px;box-shadow:0 5px 16px rgba(0,0,0,.18);z-index:15;}
 #staff-list.open{display:flex;}
 #staff-list .staff-chip{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:2px 7px;font-size:10px;color:var(--ink);white-space:nowrap;}
 #staff-list .staff-chip b{font-weight:700;margin-right:3px;color:var(--text-dim);}
@@ -246,6 +246,7 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
       <div id="role-legend"><b>A</b><b>B</b><b>C</b><b>D</b><b>E/F</b><span>主播1</span><span>主播2</span><span>中控1</span><span>中控2</span><span>机动</span></div>
       <div id="ban-legend"></div>
     </div>
+    <div id="staff-bar"><button class="staff-toggle" onclick="toggleStaffList()">▼ 人员一览</button><div id="staff-list"></div></div>
     <div id="color-legend">
       <div>主播·中控已齐<i style="background:var(--green)"></i></div>
       <div>需协调<i style="background:var(--blue)"></i></div>
@@ -253,7 +254,6 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
       <div>无人<i style="background:var(--red)"></i></div>
     </div>
   </div>
-  <div id="staff-bar"><button class="staff-toggle" onclick="toggleStaffList()">▼ 员工一览</button><div id="staff-list"></div></div>
   <div id="weekday-row"><div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div></div>
   <div id="cal-grid"></div>
   <button id="fab-myshift" onclick="openMyShift()">我的班表</button>
@@ -522,9 +522,9 @@ zh:`<p class="intro">本页面是 Pantera 排班表的使用说明，有问题�
 <ul>
 <li>🟩 绿＝主播·中控已齐　🟦 蓝＝需协调　🟨 黄＝缺一方　🟥 红＝无人</li>
 </ul>
-<h4>⑧ 员工一览</h4>
+<h4>⑧ 人员一览</h4>
 <ul>
-<li>日历上方「员工一览」可展开，查看每个名字对应的首字，避免昵称相似认错人。</li>
+<li>日历上方「人员一览」可展开，查看每个名字对应的首字，避免昵称相似认错人。</li>
 </ul>`,
 ja:`<p class="intro">Pantera 排班表（シフト表）の使い方です。不明点はいつでも管理者まで。</p>
 <h4>① アカウント</h4>
@@ -573,9 +573,9 @@ ja:`<p class="intro">Pantera 排班表（シフト表）の使い方です。不
 <ul>
 <li>🟩 緑＝主播·中控そろい　🟦 青＝要調整　🟨 黄＝片方欠け　🟥 赤＝未登録</li>
 </ul>
-<h4>⑧ 员工一覧</h4>
+<h4>⑧ 人员一览</h4>
 <ul>
-<li>カレンダー上部「员工一览」を開くと、各名前の頭文字が確認でき、似た昵称の人と間違えにくくなります。</li>
+<li>カレンダー上部「人员一览」を開くと、各名前の頭文字が確認でき、似た昵称の人と間違えにくくなります。</li>
 </ul>`
 };
 
@@ -653,7 +653,7 @@ function addPress(el,onTap,onLong){let timer=null,fired=false,moved=false,sx=0,s
   el.addEventListener('pointerleave',()=>clearTimeout(timer));el.addEventListener('pointercancel',()=>clearTimeout(timer));
   el.addEventListener('contextmenu',e=>e.preventDefault());
 }
-function toggleStaffList(){const sl=$('staff-list');const btn=sl.previousElementSibling;const open=sl.classList.toggle('open');btn.textContent=open?'▲ 收起':'▼ 员工一览';if(open)buildStaffList();}
+function toggleStaffList(){const sl=$('staff-list');const btn=sl.previousElementSibling;const open=sl.classList.toggle('open');btn.textContent=open?'▲ 收起':'▼ 人员一览';if(open)buildStaffList();}
 function buildStaffList(){
   const names=new Map();const md=monthData||{};
   Object.values(md).forEach(dayObj=>{if(!dayObj||typeof dayObj!=='object')return;Object.values(dayObj).forEach(slot=>{if(!slot||typeof slot!=='object')return;ROLES.forEach(r=>{const h=slot[r.key];if(h&&h.id&&h.name){const first=Array.from(h.name)[0]||'';if(!names.has(h.name))names.set(h.name,first);}});});});
