@@ -538,7 +538,9 @@ async function doCheckIn(day,slotId,roleKey,time){
   const ts=Date.now();
   await DB.set(`${monthPath()}/${day}/${slotId}/${roleKey}/checkIn`,ts);
   const s=slots[slotId]||{};const li=lateInfo(ts,shiftStartTs(viewYear,viewMonth,day,time));
-  logEvent(currentRoomId,{action:'checkin',target:`${viewMonth}/${day} ${banName(s)} ${(ROLES.find(r=>r.key===roleKey)||{}).label||roleKey}`,after:hhmm(ts)+(li&&li.late?` 迟到${li.minutes}分`:' 准时')});
+  const _m=time?String(time).match(/(\d{1,2}):(\d{2})/):null;const _start=_m?_m[0]:(s.time||'');
+  const _diff=li?(li.late?`比排班表晚${li.minutes}分钟`:`比排班表早${li.minutes}分钟`):'';
+  logEvent(currentRoomId,{action:'checkin',target:`${viewMonth}/${day} ${banName(s)} ${(ROLES.find(r=>r.key===roleKey)||{}).label||roleKey}`,before:_start,after:`${hhmm(ts)} ${_diff}`});
   renderMyShift();
 }
 
