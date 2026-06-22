@@ -99,6 +99,17 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
 .sheet-body{overflow-y:auto;overflow-x:hidden;padding:4px 16px 24px;flex:1;width:100%;box-sizing:border-box;}
 .sheet-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:55;display:none;}
 .sheet-backdrop.show{display:block;}
+.lang-toggle{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;flex-shrink:0;}
+.lang-btn{border:none;background:var(--card);color:var(--text-dim);font-family:inherit;font-size:12px;padding:5px 9px;cursor:pointer;}
+.lang-btn.active{background:var(--ink);color:#fff;font-weight:700;}
+.manual-content{font-size:14px;line-height:1.75;color:var(--ink);user-select:text;-webkit-user-select:text;padding-bottom:10px;}
+.manual-content h4{font-size:15px;margin:18px 0 6px;color:var(--ink);border-left:4px solid var(--ink);padding-left:9px;}
+.manual-content ul{margin:4px 0;padding-left:20px;}
+.manual-content li{margin:4px 0;}
+.manual-content b{font-weight:700;}
+.manual-content .note{background:#fff5e6;border:1px solid #f0d9a8;border-radius:12px;padding:4px 14px 10px;margin:10px 0;}
+.manual-content .note h4{border-left-color:#d98a00;color:#a85f00;}
+.manual-content .intro{color:var(--text-dim);font-size:13px;margin:2px 0 8px;}
 .slot-row{background:var(--card);border-radius:10px;padding:10px 12px;margin-bottom:10px;border:1px solid var(--line);}
 .slot-row.mine{border-color:var(--ink);}
 .slot-row .stitle{font-size:14px;font-weight:700;margin-bottom:8px;}
@@ -216,6 +227,7 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
     <button class="btn small" id="btn-register" onclick="openModal('modal-register')">注册</button>
     <button class="btn small ghost" id="btn-login" onclick="handleLoginClick()">登录</button>
     <button class="btn small ghost" id="btn-admin" style="display:none" onclick="openAdmin()">⚙ 管理</button>
+    <button class="btn small ghost" id="btn-manual" onclick="openManual()">📖 说明</button>
     <button class="btn small ghost" id="btn-account" style="display:none" onclick="openAccountModal()">设置</button>
     <button class="btn small ghost" id="btn-logout" style="display:none" onclick="doLogout()">退出</button>
   </div>
@@ -254,6 +266,16 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
 <div class="sheet" id="sheet-myshift">
   <div class="sheet-header" data-swipe="sheet-myshift"><div class="sheet-grip"></div><h3 id="myshift-title">我的班表</h3><button class="sheet-close" onclick="closeSheet('sheet-myshift')">✕</button></div>
   <div class="sheet-body" id="myshift-body"></div>
+</div>
+
+<div class="sheet" id="sheet-manual" style="max-height:92vh;">
+  <div class="sheet-header" data-swipe="sheet-manual"><div class="sheet-grip"></div><h3 id="manual-title">使用说明</h3>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <div class="lang-toggle"><button id="lang-zh" class="lang-btn active" onclick="setManualLang('zh')">简体中文</button><button id="lang-ja" class="lang-btn" onclick="setManualLang('ja')">日本語</button></div>
+      <button class="sheet-close" onclick="closeSheet('sheet-manual')">✕</button>
+    </div>
+  </div>
+  <div class="sheet-body" id="manual-body"></div>
 </div>
 
 <div class="sheet" id="sheet-admin" style="max-height:92vh;">
@@ -438,6 +460,108 @@ async function propagateNameChange(uid,newName){
   await Promise.all(tasks.map(p=>DB.set(p,newName)));
   return tasks.length;
 }
+
+/* ===== 使用说明 / マニュアル ===== */
+let manualLang='zh';
+function openManual(){renderManual();openSheet('sheet-manual');}
+function setManualLang(lang){manualLang=lang;$('lang-zh').classList.toggle('active',lang==='zh');$('lang-ja').classList.toggle('active',lang==='ja');renderManual();}
+function renderManual(){$('manual-title').textContent=manualLang==='zh'?'使用说明':'使い方';$('manual-body').innerHTML=`<div class="manual-content">${MANUAL[manualLang]}</div>`;}
+const MANUAL={
+zh:`<p class="intro">本页面是 Pantera 排班表的使用说明，有问题随时联系管理员。</p>
+<h4>① 账号</h4>
+<ul>
+<li><b>新人注册</b>：点右上「注册」，填写<b>昵称</b>、<b>密码</b>、<b>生日</b>。生日请填真实日期（一人一号，防止重复注册）。</li>
+<li><b>登录</b>：点「登录」，输入昵称和密码。</li>
+<li><b>忘记密码 / 昵称</b>：在登录界面点「找回账号」，输入生日即可查到。</li>
+<li><b>修改账号</b>：登录后点右上「设置」，输入生日验证后可改昵称和密码。改昵称后，<b>之前登记过的班会自动同步成新名字</b>。</li>
+</ul>
+<h4>② 怎么排班</h4>
+<ul>
+<li>在日历上<b>点某一天</b>，弹出登记界面。</li>
+<li>一共<b>六个按钮</b>：主播1、主播2、中控1、中控2、机动1、机动2。</li>
+<li>点角色按钮即可登记，<b>再点一次取消</b>。一个班次只能占一个角色。</li>
+</ul>
+<div class="note">
+<h4>③ 排班注意事项（重要）</h4>
+<ul>
+<li>一共六个按钮，请大家<b>先填写「主播1」、「中控1」</b>。</li>
+<li><b>尽量不要撞班次。</b></li>
+<li>「主播2」和「中控2」<b>新人可以填写作为见习，每个月不超过 3 次</b>。</li>
+<li>如果来公司有事情、或者有时间做备选，可以填写「机动1」「机动2」。</li>
+<li>后续开展别的直播间可以安排。</li>
+</ul>
+</div>
+<h4>④ 备注</h4>
+<ul>
+<li>登记界面每个班次有备注栏，<b>长按可放大编辑</b>。</li>
+<li>备注后会<b>自动加上你的名字</b>，方便大家知道是谁写的。</li>
+<li>有备注的班次，日历上会显示一个<b>红点</b>。</li>
+</ul>
+<h4>⑤ 打卡</h4>
+<ul>
+<li>点右下角「我的班表」，查看自己所有的班。</li>
+<li>到点后在对应班次点「<b>打卡</b>」，系统自动记录准时 / 迟到。</li>
+</ul>
+<h4>⑥ 到岗 / 离岗</h4>
+<ul>
+<li>连接公司 Wi-Fi 并打开本页面，会<b>自动记录到岗</b>；断开则离岗。</li>
+</ul>
+<h4>⑦ 颜色说明</h4>
+<ul>
+<li>🟩 绿＝主播·中控已齐　🟦 蓝＝需协调　🟨 黄＝缺一方　🟥 红＝无人</li>
+</ul>
+<h4>⑧ 员工一览</h4>
+<ul>
+<li>日历上方「员工一览」可展开，查看每个名字对应的首字，避免昵称相似认错人。</li>
+</ul>`,
+ja:`<p class="intro">Pantera 排班表（シフト表）の使い方です。不明点はいつでも管理者まで。</p>
+<h4>① アカウント</h4>
+<ul>
+<li><b>新規登録</b>：右上「注册」から<b>昵称（ニックネーム）</b>・<b>密码（パスワード）</b>・<b>生日（生年月日）</b>を入力。生年月日は本当の日付を（一人一アカウント、重複登録防止）。</li>
+<li><b>ログイン</b>：「登录」から昵称とパスワードを入力。</li>
+<li><b>パスワード / 昵称を忘れたとき</b>：ログイン画面の「找回账号」で生年月日を入れると確認できます。</li>
+<li><b>アカウント変更</b>：ログイン後、右上「设置」で生年月日を確認後に昵称とパスワードを変更可能。昵称を変えると<b>過去に登録した班も自動で新しい名前に同期</b>されます。</li>
+</ul>
+<h4>② 班の登録方法</h4>
+<ul>
+<li>カレンダーの<b>日付をタップ</b>すると登録画面が出ます。</li>
+<li>ボタンは<b>6つ</b>：主播1・主播2・中控1・中控2・机动1・机动2。</li>
+<li>役割ボタンを押すと登録、<b>もう一度押すと取消</b>。1つの班で持てる役割は1つだけ。</li>
+</ul>
+<div class="note">
+<h4>③ 登録の注意事項（重要）</h4>
+<ul>
+<li>6つのボタンのうち、まず<b>「主播1」「中控1」から埋めてください</b>。</li>
+<li><b>なるべく班がかぶらないように。</b></li>
+<li>「主播2」「中控2」は<b>新人が見習いとして登録可、月3回まで</b>。</li>
+<li>会社で用事があるとき、または時間があって予備に入れるときは「机动1」「机动2」へ。</li>
+<li>今後ほかの直播間が始まれば、そちらも調整できます。</li>
+</ul>
+</div>
+<h4>④ 备注（メモ）</h4>
+<ul>
+<li>登録画面の各班にメモ欄があり、<b>長押しで拡大編集</b>できます。</li>
+<li>メモには<b>自動であなたの名前</b>が付きます。</li>
+<li>メモのある班は、カレンダー上に<b>赤い点</b>が出ます。</li>
+</ul>
+<h4>⑤ 打卡（出勤打刻）</h4>
+<ul>
+<li>右下の「我的班表」で自分の班を確認。</li>
+<li>時間になったら対応する班で「<b>打卡</b>」を押すと、准时（時間通り）/ 迟到（遅刻）が自動記録されます。</li>
+</ul>
+<h4>⑥ 到岗 / 离岗（出社・退社）</h4>
+<ul>
+<li>会社の Wi-Fi に接続してこのページを開くと<b>自動で到岗（出社）</b>を記録。切断すると离岗（退社）になります。</li>
+</ul>
+<h4>⑦ 色の意味</h4>
+<ul>
+<li>🟩 緑＝主播·中控そろい　🟦 青＝要調整　🟨 黄＝片方欠け　🟥 赤＝未登録</li>
+</ul>
+<h4>⑧ 员工一覧</h4>
+<ul>
+<li>カレンダー上部「员工一览」を開くと、各名前の頭文字が確認でき、似た昵称の人と間違えにくくなります。</li>
+</ul>`
+};
 
 /* ===== 会话 ===== */
 const SESSION_TTL_MS=30*60*1000, REMEMBER_TTL_MS=4*60*60*1000;
