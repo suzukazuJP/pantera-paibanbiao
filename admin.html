@@ -236,7 +236,7 @@ async function loadLate(){
     entriesOf(md).forEach(([dayStr,dd])=>{const day=parseInt(dayStr,10);if(!day||!dd)return;
       Object.entries(dd).forEach(([slotId,slot])=>{if(slotId==='memo'||!slot)return;const s=sl[slotId]||{order:0,time:slotId};
         ROLES.forEach(r=>{const h=slot[r.key];if(h&&h.id&&h.checkIn){const startTs=shiftStartTs(lateYear,lateMonth,day,s.time);const min=Math.max(0,Math.round((h.checkIn-startTs)/60000));const late=h.checkIn>startTs;
-          rows.push({room:(rooms[rid]||{}).name||rid,day,order:s.order||0,slot:`${s.order||''}班 ${s.time||''}`,role:r.label,name:h.name,checkIn:h.checkIn,late,min});}});});});
+          rows.push({room:(rooms[rid]||{}).name||rid,day,order:s.order||0,start:(String(s.time||'').match(/(\d{1,2}):(\d{2})/)||[])[0]||(s.time||''),slot:`${s.order||''}班 ${s.time||''}`,role:r.label,name:h.name,checkIn:h.checkIn,late,min});}});});});
   }
   lateRows=rows;renderLate();
 }
@@ -261,14 +261,14 @@ async function purgeOldLogs(){
 function renderLate(){
   const kw=($('late-search').value||'').trim().toLowerCase();
   let list=lateRows.filter(r=>!kw||(r.name||'').toLowerCase().includes(kw));
-  const sum={};list.forEach(r=>{const k=r.name;if(!sum[k])sum[k]={name:r.name,lateCount:0,lateMin:0,total:0};sum[k].total++;if(r.late){sum[k].lateCount++;sum[k].lateMin+=r.min;}});
+  const sum={};list.forEach(r=>{const k=r.name;if(!sum[k])sum[k]={name:r.name,lateCount:0,lateMin:0,total:0,lates:[]};sum[k].total++;if(r.late){sum[k].lateCount++;sum[k].lateMin+=r.min;sum[k].lates.push(`${lateMonth}/${r.day} ${r.order}班(${r.start}起) 迟到${r.min}分`);}});
   const sums=Object.values(sum).sort((a,b)=>b.lateMin-a.lateMin||b.lateCount-a.lateCount);
   const showRoom=scope==='all';
   let h='';
   h+=`<h4 style="color:var(--accent);font-size:13px;margin:4px 0 8px;">个人迟到汇总（${lateMonth}月）</h4>`;
-  h+=`<table><thead><tr><th>姓名</th><th>打卡次数</th><th>迟到次数</th><th>迟到合计(分)</th></tr></thead><tbody>`;
-  if(!sums.length)h+=`<tr><td colspan="4" class="muted">本月暂无打卡记录</td></tr>`;
-  sums.forEach(s=>{h+=`<tr><td>${esc(s.name)}</td><td>${s.total}</td><td style="color:${s.lateCount?'#e08a8a':'inherit'}">${s.lateCount}</td><td style="color:${s.lateMin?'#e08a8a':'inherit'}">${s.lateMin}</td></tr>`;});
+  h+=`<table><thead><tr><th>姓名</th><th>打卡次数</th><th>迟到次数</th><th>迟到合计(分)</th><th>迟到的班（日期·开始时间）</th></tr></thead><tbody>`;
+  if(!sums.length)h+=`<tr><td colspan="5" class="muted">本月暂无打卡记录</td></tr>`;
+  sums.forEach(s=>{h+=`<tr><td>${esc(s.name)}</td><td>${s.total}</td><td style="color:${s.lateCount?'#e08a8a':'inherit'}">${s.lateCount}</td><td style="color:${s.lateMin?'#e08a8a':'inherit'}">${s.lateMin}</td><td style="color:#e08a8a;font-size:11px;">${s.lates.length?s.lates.map(esc).join('<br>'):'<span class="muted">—</span>'}</td></tr>`;});
   h+=`</tbody></table>`;
   h+=`<h4 style="color:var(--accent);font-size:13px;margin:18px 0 8px;">打卡明细</h4>`;
   list.sort((a,b)=>a.day-b.day||a.order-b.order);
