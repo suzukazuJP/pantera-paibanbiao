@@ -64,6 +64,12 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
 #color-legend{font-size:9px;color:var(--text-dim);line-height:1.7;text-align:right;flex-shrink:0;}
 #color-legend div{display:flex;align-items:center;justify-content:flex-end;gap:4px;}
 #color-legend i{display:inline-block;width:9px;height:9px;border-radius:2px;flex-shrink:0;}
+#staff-bar{padding:0 8px 4px;display:flex;align-items:center;gap:6px;}
+#staff-bar .staff-toggle{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:3px 10px;font-size:10px;color:var(--text-dim);cursor:pointer;}
+#staff-list{display:none;flex-wrap:wrap;gap:4px;padding:2px 0;}
+#staff-list.open{display:flex;}
+#staff-list .staff-chip{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:2px 7px;font-size:10px;color:var(--ink);white-space:nowrap;}
+#staff-list .staff-chip b{font-weight:700;margin-right:3px;color:var(--text-dim);}
 #weekday-row{display:grid;grid-template-columns:repeat(7,1fr);padding:0 4px;}
 #weekday-row div{text-align:center;font-size:11px;color:var(--text-dim);padding:1px 0;}
 #weekday-row div:first-child{color:#d06060;}
@@ -177,6 +183,18 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
   <div class="row"><button class="btn ghost" onclick="closeModal('modal-help')">关闭</button><button class="btn" onclick="doHelp()">查询</button></div>
 </div></div>
 
+<div class="overlay" id="modal-account" style="z-index:88;"><div class="modal">
+  <h2>账号设置</h2>
+  <p class="muted" style="margin-bottom:10px;">输入生日验证身份后可修改昵称和密码</p>
+  <div class="field"><label>生日验证（yyyymmdd）</label><input id="acc-birth" inputmode="numeric" maxlength="8"></div>
+  <div class="err" id="acc-err"></div>
+  <div id="acc-fields" style="display:none;">
+    <div class="field"><label>新昵称</label><input id="acc-name" autocomplete="off"></div>
+    <div class="field"><label>新密码</label><input id="acc-pw" type="password" autocomplete="new-password"><button class="eye" data-eye="acc-pw"></button></div>
+  </div>
+  <div class="row"><button class="btn ghost" onclick="closeModal('modal-account')">取消</button><button class="btn" id="acc-action" onclick="verifyAccount()">验证</button></div>
+</div></div>
+
 <div class="overlay" id="modal-auth" style="z-index:85;"><div class="modal" style="text-align:center;">
   <h2>需要登录</h2><p class="muted" style="margin-bottom:14px;">登记班表前请先登录或注册</p>
   <div class="row"><button class="btn ghost" onclick="closeModal('modal-auth');openModal('modal-register')">注册</button><button class="btn" onclick="closeModal('modal-auth');handleLoginClick()">登录</button></div>
@@ -198,6 +216,7 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
     <button class="btn small" id="btn-register" onclick="openModal('modal-register')">注册</button>
     <button class="btn small ghost" id="btn-login" onclick="handleLoginClick()">登录</button>
     <button class="btn small ghost" id="btn-admin" style="display:none" onclick="openAdmin()">⚙ 管理</button>
+    <button class="btn small ghost" id="btn-account" style="display:none" onclick="openAccountModal()">设置</button>
     <button class="btn small ghost" id="btn-logout" style="display:none" onclick="doLogout()">退出</button>
   </div>
   <div id="room-bar">📺 <span id="room-name">直播间</span></div>
@@ -214,6 +233,7 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
       <div>无人<i style="background:var(--red)"></i></div>
     </div>
   </div>
+  <div id="staff-bar"><button class="staff-toggle" onclick="toggleStaffList()">▼ 员工一览</button><div id="staff-list"></div></div>
   <div id="weekday-row"><div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div></div>
   <div id="cal-grid"></div>
   <button id="fab-myshift" onclick="openMyShift()">我的班表</button>
@@ -379,6 +399,29 @@ async function doHelp(){
   res.innerHTML=hits.map(([,u])=>`昵称：<b>${esc(u.name)}</b>　密码：<b>${esc(u.password)}</b>`).join('<br>');
 }
 
+function openAccountModal(){$('acc-birth').value='';$('acc-err').textContent='';$('acc-fields').style.display='none';$('acc-name').value='';$('acc-pw').value='';$('acc-action').textContent='验证';$('acc-action').onclick=verifyAccount;openModal('modal-account');}
+let _accUid=null;
+async function verifyAccount(){
+  const birth=$('acc-birth').value.trim(),err=$('acc-err');err.textContent='';
+  if(!/^\d{8}$/.test(birth)){err.textContent='生日格式应为 yyyymmdd';return;}
+  if(!currentUser||currentUser.isMaster)return;
+  const u=await DB.get(`users/${currentUser.id}`);
+  if(!u||u.birth!==birth){err.textContent='生日不匹配';return;}
+  _accUid=currentUser.id;$('acc-name').value=u.name;$('acc-pw').value=u.password||'';
+  $('acc-fields').style.display='';$('acc-action').textContent='保存';$('acc-action').onclick=saveAccount;
+}
+async function saveAccount(){
+  const name=$('acc-name').value.trim(),pw=$('acc-pw').value,err=$('acc-err');err.textContent='';
+  if(!name||!pw){err.textContent='昵称和密码不能为空';return;}
+  if(name===MASTER_ID){err.textContent='该昵称不可使用';return;}
+  const users=await DB.get('users')||{};
+  if(entriesOf(users).some(([k,u])=>k!==_accUid&&u.name===name)){err.textContent='该昵称已被使用';return;}
+  await DB.set(`users/${_accUid}/name`,name);await DB.set(`users/${_accUid}/password`,pw);
+  currentUser.name=name;saveSession(currentUser);updateHeaderUI();
+  logEvent(currentRoomId,{action:'edit',target:`${name} 修改了账号信息`});
+  closeModal('modal-account');showBanner('账号信息已更新');
+}
+
 /* ===== 会话 ===== */
 const SESSION_TTL_MS=30*60*1000, REMEMBER_TTL_MS=4*60*60*1000;
 function saveSession(u){localStorage.setItem('pantera_user',JSON.stringify({user:u,exp:Date.now()+SESSION_TTL_MS}));localStorage.setItem('pantera_remember',JSON.stringify({user:u,exp:Date.now()+REMEMBER_TTL_MS}));}
@@ -405,7 +448,7 @@ function _attendVis(){if(document.visibilityState==='visible')checkAttendance();
 function startAttendance(){stopAttendance();_attendAt=false;checkAttendance();_attendTimer=setInterval(checkAttendance,60000);window.addEventListener('online',checkAttendance);document.addEventListener('visibilitychange',_attendVis);}
 function stopAttendance(){if(_attendTimer)clearInterval(_attendTimer);_attendTimer=null;window.removeEventListener('online',checkAttendance);document.removeEventListener('visibilitychange',_attendVis);if(_attendAt&&currentUser&&!currentUser.isMaster){_attendAt=false;logEvent(currentRoomId,{action:'leave',target:'离岗'});}}
 function requireAuth(){if(currentUser)return true;openModal('modal-auth');return false;}
-function updateHeaderUI(){const logged=!!currentUser;$('btn-register').style.display=logged?'none':'';$('btn-login').style.display=logged?'none':'';$('btn-logout').style.display=logged?'':'none';$('btn-admin').style.display=(logged&&currentUser.isMaster)?'':'none';$('cal-uname').textContent=logged?(currentUser.isMaster?'👑 '+currentUser.name:currentUser.name):'';$('fab-myshift').style.display=logged?'':'none';}
+function updateHeaderUI(){const logged=!!currentUser;$('btn-register').style.display=logged?'none':'';$('btn-login').style.display=logged?'none':'';$('btn-logout').style.display=logged?'':'none';$('btn-admin').style.display=(logged&&currentUser.isMaster)?'':'none';$('btn-account').style.display=(logged&&!currentUser.isMaster)?'':'none';$('cal-uname').textContent=logged?(currentUser.isMaster?'👑 '+currentUser.name:currentUser.name):'';$('fab-myshift').style.display=logged?'':'none';}
 
 /* ===== 订阅 ===== */
 function subscribeMonth(){if(unsubMonth)unsubMonth();unsubMonth=DB.watch(monthPath(),val=>{monthData=val||{};renderCalendar();refreshOpenViews();});}
@@ -452,6 +495,14 @@ function addPress(el,onTap,onLong){let timer=null,fired=false,moved=false,sx=0,s
   el.addEventListener('pointerup',()=>{clearTimeout(timer);if(!fired&&!moved)onTap();});
   el.addEventListener('pointerleave',()=>clearTimeout(timer));el.addEventListener('pointercancel',()=>clearTimeout(timer));
   el.addEventListener('contextmenu',e=>e.preventDefault());
+}
+function toggleStaffList(){const sl=$('staff-list');const btn=sl.previousElementSibling;const open=sl.classList.toggle('open');btn.textContent=open?'▲ 收起':'▼ 员工一览';if(open)buildStaffList();}
+function buildStaffList(){
+  const names=new Map();const md=monthData||{};
+  Object.values(md).forEach(dayObj=>{if(!dayObj||typeof dayObj!=='object')return;Object.values(dayObj).forEach(slot=>{if(!slot||typeof slot!=='object')return;ROLES.forEach(r=>{const h=slot[r.key];if(h&&h.id&&h.name){const first=Array.from(h.name)[0]||'';if(!names.has(h.name))names.set(h.name,first);}});});});
+  const sl=$('staff-list');
+  if(!names.size){sl.innerHTML='<span style="font-size:10px;color:var(--text-dim);">本月暂无登记</span>';return;}
+  sl.innerHTML=[...names.entries()].sort((a,b)=>a[0].localeCompare(b[0],'zh')).map(([name,first])=>`<span class="staff-chip"><b>${esc(first)}</b>${esc(name)}</span>`).join('');
 }
 function setupCalendarSwipe(){const grid=$('cal-grid');let sx=null,sy=null;
   grid.addEventListener('touchstart',e=>{sx=e.touches[0].clientX;sy=e.touches[0].clientY;},{passive:true});
