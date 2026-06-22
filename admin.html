@@ -266,9 +266,9 @@ function renderLate(){
   const showRoom=scope==='all';
   let h='';
   h+=`<h4 style="color:var(--accent);font-size:13px;margin:4px 0 8px;">个人迟到汇总（${lateMonth}月）</h4>`;
-  h+=`<table><thead><tr><th>姓名</th><th>打卡次数</th><th>迟到次数</th><th>迟到合计(分)</th><th>迟到的班（日期·开始时间）</th></tr></thead><tbody>`;
+  h+=`<table><thead><tr><th>姓名</th><th>打卡次数</th><th>迟到次数</th><th>迟到合计(分)</th><th>迟到的班</th></tr></thead><tbody>`;
   if(!sums.length)h+=`<tr><td colspan="5" class="muted">本月暂无打卡记录</td></tr>`;
-  sums.forEach(s=>{h+=`<tr><td>${esc(s.name)}</td><td>${s.total}</td><td style="color:${s.lateCount?'#e08a8a':'inherit'}">${s.lateCount}</td><td style="color:${s.lateMin?'#e08a8a':'inherit'}">${s.lateMin}</td><td style="color:#e08a8a;font-size:11px;">${s.lates.length?s.lates.map(esc).join('<br>'):'<span class="muted">—</span>'}</td></tr>`;});
+  sums.forEach((s,i)=>{h+=`<tr><td>${esc(s.name)}</td><td>${s.total}</td><td style="color:${s.lateCount?'#e08a8a':'inherit'}">${s.lateCount}</td><td style="color:${s.lateMin?'#e08a8a':'inherit'}">${s.lateMin}</td><td>${s.lates.length?`<button class="btn-s" style="font-size:11px;padding:2px 8px;" onclick="var d=document.getElementById('late-detail-${i}');d.style.display=d.style.display==='none'?'block':'none';">详情</button>`:'<span class="muted">—</span>'}</td></tr><tr id="late-detail-${i}" style="display:none;"><td colspan="5" style="color:#e08a8a;font-size:11px;padding:4px 12px;">${s.lates.map(esc).join('<br>')}</td></tr>`;});
   h+=`</tbody></table>`;
   h+=`<h4 style="color:var(--accent);font-size:13px;margin:18px 0 8px;">打卡明细</h4>`;
   list.sort((a,b)=>a.day-b.day||a.order-b.order);
