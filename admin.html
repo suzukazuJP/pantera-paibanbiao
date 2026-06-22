@@ -271,7 +271,7 @@ function renderLate(){
   const showRoom=scope==='all';
   let h='';
   h+=`<h4 style="color:var(--accent);font-size:13px;margin:4px 0 8px;">个人迟到汇总（${lateMonth}月）</h4>`;
-  h+=`<table><thead><tr><th>姓名</th><th>打卡次数</th><th>迟到次数</th><th>迟到合计(分)</th><th>迟到的班</th></tr></thead><tbody>`;
+  h+=`<table style="table-layout:fixed;"><colgroup><col style="width:18%"><col style="width:14%"><col style="width:14%"><col style="width:18%"><col style="width:36%"></colgroup><thead><tr><th>姓名</th><th>打卡次数</th><th>迟到次数</th><th>迟到合计(分)</th><th>迟到的班</th></tr></thead><tbody>`;
   if(!sums.length)h+=`<tr><td colspan="5" class="muted">本月暂无打卡记录</td></tr>`;
   sums.forEach((s,i)=>{h+=`<tr><td>${esc(s.name)}</td><td>${s.total}</td><td style="color:${s.lateCount?'#e08a8a':'inherit'}">${s.lateCount}</td><td style="color:${s.lateMin?'#e08a8a':'inherit'}">${s.lateMin}</td><td>${s.lates.length?`<button class="late-toggle" onclick="var u=this.nextElementSibling;u.classList.toggle('open');this.textContent=u.classList.contains('open')?'▲ 收起':'▼ 详情';">▼ 详情</button><ul class="late-dd">${s.lates.map(l=>'<li>'+esc(l)+'</li>').join('')}</ul>`:'<span class="muted">—</span>'}</td></tr>`;});
   h+=`</tbody></table>`;
