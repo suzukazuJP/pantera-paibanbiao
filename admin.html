@@ -166,7 +166,7 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
 const firebaseConfig={databaseURL:"https://pantera-paibanbiao-default-rtdb.asia-southeast1.firebasedatabase.app"};
 const MASTER_ID="pantera",MASTER_PW="1205";
 const BASE=firebaseConfig.databaseURL;
-const ROLES=[{key:'A',label:'主播1'},{key:'B',label:'主播2'},{key:'C',label:'中控1'},{key:'D',label:'中控2'},{key:'E',label:'机动1'},{key:'F',label:'机动2'}];
+const ROLES=[{key:'A',label:'主播1'},{key:'B',label:'主播2'},{key:'C',label:'中控1'},{key:'E',label:'拍视频1'},{key:'F',label:'拍视频2'}];
 firebase.initializeApp(firebaseConfig);
 const fdb=firebase.database();
 const DB={get:p=>fdb.ref(p).once('value').then(s=>s.val()),set:(p,v)=>fdb.ref(p).set(v),remove:p=>fdb.ref(p).remove(),raw:fdb};

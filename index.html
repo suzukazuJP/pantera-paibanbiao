@@ -161,6 +161,11 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
 #undo-toast.show{opacity:1;transform:translateX(-50%) translateY(0);pointer-events:auto;}
 #undo-toast button{background:#f9e4a0;color:var(--ink);border:none;border-radius:14px;padding:5px 12px;font-size:13px;font-weight:700;cursor:pointer;}
 #undo-toast .timer{font-size:11px;color:#aaa;}
+.byadmin-tag{display:inline-block;background:#e8821e;color:#fff;border-radius:5px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:6px;vertical-align:middle;white-space:nowrap;}
+.lock-tag{display:inline-block;color:#9a6a1e;font-size:11px;font-weight:700;margin-left:6px;vertical-align:middle;white-space:nowrap;}
+.role-btn.locked{opacity:.6;background:#efeae0;}
+.role-btn .ba{color:#e8821e;font-weight:700;}
+#assign-list .btn{width:100%;}
 </style>
 </head>
 <body>
@@ -229,6 +234,13 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
   <div class="row"><button class="btn ghost" onclick="closeModal('modal-memo')">取消</button><button class="btn" onclick="saveMemoBig()">保存</button></div>
 </div></div>
 
+<div class="overlay" id="modal-assign" style="z-index:90;"><div class="modal">
+  <h2 id="assign-title">代理登记</h2>
+  <p class="muted" style="font-size:12px;margin-bottom:10px;color:var(--text-dim);">选择员工，由管理员代为登记（会显示「管理者代登」）。</p>
+  <div id="assign-list" style="display:flex;flex-direction:column;gap:6px;max-height:46vh;overflow:auto;"></div>
+  <div class="row"><button class="btn ghost" onclick="closeModal('modal-assign')">取消</button></div>
+</div></div>
+
 <div id="screen-calendar" class="screen show">
   <div id="cal-header">
     <span class="uname" id="cal-uname"></span>
@@ -243,7 +255,7 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
   <div id="month-nav"><button id="nav-prev" onclick="navMonth(-1)">‹</button><span id="month-label"></span><button onclick="navMonth(1)">›</button></div>
   <div id="cal-info">
     <div id="legend-left">
-      <div id="role-legend"><b>A</b><b>B</b><b>C</b><b>D</b><b>E/F</b><span>主播1</span><span>主播2</span><span>中控1</span><span>中控2</span><span>机动</span></div>
+      <div id="role-legend"><b>A</b><b>B</b><b>C</b><b>D</b><b>E</b><span>主播1</span><span>主播2</span><span>中控1</span><span>拍视频1</span><span>拍视频2</span></div>
       <div id="ban-legend"></div>
     </div>
     <div id="staff-bar"><button class="staff-toggle" onclick="toggleStaffList()">▼ 人员一览</button><div id="staff-list"></div></div>
@@ -317,7 +329,7 @@ const firebaseConfig = { databaseURL:"https://pantera-paibanbiao-default-rtdb.as
 const MASTER_ID="pantera", MASTER_PW="1205";
 const DEFAULT_SLOTS={s1:{order:1,time:"10:00〜12:00"},s2:{order:2,time:"15:00〜17:00"},s3:{order:3,time:"17:00〜19:00"},s4:{order:4,time:"20:00〜23:30"},s5:{order:5,time:"25:00〜27:00"}};
 const CIRCLED=["①","②","③","④","⑤","⑥","⑦","⑧","⑨"];
-const ROLES=[{key:'A',label:'主播1',group:'G'},{key:'B',label:'主播2',group:'G'},{key:'C',label:'中控1',group:'H'},{key:'D',label:'中控2',group:'H'},{key:'E',label:'机动1',group:'I'},{key:'F',label:'机动2',group:'I'}];
+const ROLES=[{key:'A',label:'主播1',group:'G'},{key:'B',label:'主播2',group:'G'},{key:'C',label:'中控1',group:'H'},{key:'E',label:'拍视频1',group:'I'},{key:'F',label:'拍视频2',group:'I'}];
 const banName=s=>`${s.order}班`, banLabel=s=>`${s.order}班 ${s.time}`;
 
 const USE_MOCK=!firebaseConfig.databaseURL||/YOUR_/.test(firebaseConfig.databaseURL);
@@ -488,17 +500,17 @@ zh:`<p class="intro">本页面是 Pantera 排班表的使用说明，有问题�
 <h4>② 怎么排班</h4>
 <ul>
 <li>在日历上<b>点某一天</b>，弹出登记界面。</li>
-<li>一共<b>六个按钮</b>：主播1、主播2、中控1、中控2、机动1、机动2。</li>
+<li>一共<b>五个按钮</b>：主播1、主播2、中控1、拍视频1、拍视频2。</li>
 <li>点角色按钮即可登记，<b>再点一次取消</b>。一个班次只能占一个角色。</li>
 </ul>
-<div class="guide"><div class="slot-row"><div class="stitle">①班 <small>10:00〜12:00</small></div><div class="role-grid"><button class="role-btn gd-hl"><span class="gd-mk">1</span>主播1<small>－</small></button><button class="role-btn">主播2<small>－</small></button><button class="role-btn gd-hl"><span class="gd-mk">2</span>中控1<small>－</small></button><button class="role-btn">中控2<small>－</small></button><button class="role-btn">机动1<small>－</small></button><button class="role-btn">机动2<small>－</small></button></div><div style="position:relative;margin-top:8px;"><span class="gd-mk" style="top:-7px;">3</span><input class="memo" placeholder="备注栏（长按可放大编辑）" readonly></div></div><p class="guide-cap">点一天后出现的登记界面：① 先填主播1　② 先填中控1　③ 备注栏（长按放大，自动加名字）</p></div>
+<div class="guide"><div class="slot-row"><div class="stitle">①班 <small>10:00〜12:00</small></div><div class="role-grid"><button class="role-btn gd-hl"><span class="gd-mk">1</span>主播1<small>－</small></button><button class="role-btn">主播2<small>－</small></button><button class="role-btn gd-hl"><span class="gd-mk">2</span>中控1<small>－</small></button><button class="role-btn">拍视频1<small>－</small></button><button class="role-btn">拍视频2<small>－</small></button></div><div style="position:relative;margin-top:8px;"><span class="gd-mk" style="top:-7px;">3</span><input class="memo" placeholder="备注栏（长按可放大编辑）" readonly></div></div><p class="guide-cap">点一天后出现的登记界面：① 先填主播1　② 先填中控1　③ 备注栏（长按放大，自动加名字）</p></div>
 <div class="note">
 <h4>③ 排班注意事项（重要）</h4>
 <ul>
-<li>一共六个按钮，请大家<b>先填写「主播1」、「中控1」</b>。</li>
+<li>一共五个按钮，请大家<b>先填写「主播1」、「中控1」</b>。</li>
 <li><b>尽量不要撞班次。</b></li>
-<li>「主播2」和「中控2」<b>新人可以填写作为见习，每个月不超过 3 次</b>。</li>
-<li>如果来公司有事情、或者有时间做备选，可以填写「机动1」「机动2」。</li>
+<li>「主播2」<b>新人可以填写作为见习，每个月不超过 3 次</b>。</li>
+<li>如果来公司有事情、或者有时间做备选，可以填写「拍视频1」「拍视频2」。</li>
 <li>后续开展别的直播间可以安排。</li>
 </ul>
 </div>
@@ -529,17 +541,17 @@ ja:`<p class="intro">Pantera 排班表（シフト表）の使い方です。不
 <h4>② 班の登録方法</h4>
 <ul>
 <li>カレンダーの<b>日付をタップ</b>すると登録画面が出ます。</li>
-<li>ボタンは<b>6つ</b>：主播1・主播2・中控1・中控2・机动1・机动2。</li>
+<li>ボタンは<b>5つ</b>：主播1・主播2・中控1・拍视频1・拍视频2。</li>
 <li>役割ボタンを押すと登録、<b>もう一度押すと取消</b>。1つの班で持てる役割は1つだけ。</li>
 </ul>
-<div class="guide"><div class="slot-row"><div class="stitle">①班 <small>10:00〜12:00</small></div><div class="role-grid"><button class="role-btn gd-hl"><span class="gd-mk">1</span>主播1<small>－</small></button><button class="role-btn">主播2<small>－</small></button><button class="role-btn gd-hl"><span class="gd-mk">2</span>中控1<small>－</small></button><button class="role-btn">中控2<small>－</small></button><button class="role-btn">机动1<small>－</small></button><button class="role-btn">机动2<small>－</small></button></div><div style="position:relative;margin-top:8px;"><span class="gd-mk" style="top:-7px;">3</span><input class="memo" placeholder="メモ欄（長押しで拡大編集）" readonly></div></div><p class="guide-cap">日付タップで出る登録画面：① まず主播1　② まず中控1　③ メモ欄（長押しで拡大・自動で名前付き）</p></div>
+<div class="guide"><div class="slot-row"><div class="stitle">①班 <small>10:00〜12:00</small></div><div class="role-grid"><button class="role-btn gd-hl"><span class="gd-mk">1</span>主播1<small>－</small></button><button class="role-btn">主播2<small>－</small></button><button class="role-btn gd-hl"><span class="gd-mk">2</span>中控1<small>－</small></button><button class="role-btn">拍视频1<small>－</small></button><button class="role-btn">拍视频2<small>－</small></button></div><div style="position:relative;margin-top:8px;"><span class="gd-mk" style="top:-7px;">3</span><input class="memo" placeholder="メモ欄（長押しで拡大編集）" readonly></div></div><p class="guide-cap">日付タップで出る登録画面：① まず主播1　② まず中控1　③ メモ欄（長押しで拡大・自動で名前付き）</p></div>
 <div class="note">
 <h4>③ 登録の注意事項（重要）</h4>
 <ul>
-<li>6つのボタンのうち、まず<b>「主播1」「中控1」から埋めてください</b>。</li>
+<li>5つのボタンのうち、まず<b>「主播1」「中控1」から埋めてください</b>。</li>
 <li><b>なるべく班がかぶらないように。</b></li>
-<li>「主播2」「中控2」は<b>新人が見習いとして登録可、月3回まで</b>。</li>
-<li>会社で用事があるとき、または時間があって予備に入れるときは「机动1」「机动2」へ。</li>
+<li>「主播2」は<b>新人が見習いとして登録可、月3回まで</b>。</li>
+<li>会社で用事があるとき、または時間があって予備に入れるときは「拍视频1」「拍视频2」へ。</li>
 <li>今後ほかの直播間が始まれば、そちらも調整できます。</li>
 </ul>
 </div>
@@ -594,7 +606,7 @@ function navMonth(d){let y=viewYear,m=viewMonth+d;if(m<1){m=12;y--;}if(m>12){m=1
 
 /* ===== 日历 ===== */
 function renderBanLegend(){$('ban-legend').innerHTML=slotList().map(([,s])=>`<div>${CIRCLED[s.order-1]||s.order}${esc(s.time)}</div>`).join('');}
-function banRowColor(day,slotId){const s=getSlotData(day,slotId);const has=k=>(s&&s[k]&&s[k].id)?1:0;const G=has('A')+has('B'),H=has('C')+has('D'),I=has('E')+has('F');const groups=(G>0?1:0)+(H>0?1:0)+(I>0?1:0);if(groups===0)return'var(--red)';if(groups===1)return'var(--yellow)';if(G===1&&H===1&&I===0)return'var(--green)';return'var(--blue)';}
+function banRowColor(day,slotId){const s=getSlotData(day,slotId);const has=k=>(s&&s[k]&&s[k].id)?1:0;const G=has('A')+has('B'),H=has('C'),I=has('E')+has('F');const groups=(G>0?1:0)+(H>0?1:0)+(I>0?1:0);if(groups===0)return'var(--red)';if(groups===1)return'var(--yellow)';if(G===1&&H===1&&I===0)return'var(--green)';return'var(--blue)';}
 function renderCalendar(){
   $('month-label').textContent=`${viewYear}年${viewMonth}月`;
   $('nav-prev').disabled=(viewYear===2026&&viewMonth===1);
@@ -615,7 +627,7 @@ function renderCalendar(){
       const roleCell=k=>{const c=document.createElement('i');const h=(slot&&slot[k]&&slot[k].id)?slot[k]:null;c.className='rc'+(h?' on':'');if(h)c.textContent=Array.from(h.name)[0]||'';return c;};
       const banDiv=()=>{const d=document.createElement('i');d.className='ban-div';return d;};
       row.appendChild(roleCell('A'));row.appendChild(roleCell('B'));row.appendChild(banDiv());
-      row.appendChild(roleCell('C'));row.appendChild(roleCell('D'));row.appendChild(banDiv());
+      row.appendChild(roleCell('C'));row.appendChild(banDiv());
       const ef=document.createElement('span');ef.className='ef';['E','F'].forEach(k=>ef.appendChild(roleCell(k)));row.appendChild(ef);
       if(slot&&slot.memo){const fl=document.createElement('i');fl.className='memoflag';row.appendChild(fl);}
       addPress(row,()=>openShiftSheet(day),()=>openDetail(day,slotId));
@@ -669,8 +681,10 @@ function renderShiftRows(){
     const row=document.createElement('div');row.className='slot-row'+(mineAny?' mine':'');
     const title=document.createElement('div');title.className='stitle';title.innerHTML=`${banName(s)}<small>${esc(s.time)}</small>`;row.appendChild(title);
     const grid=document.createElement('div');grid.className='role-grid';
-    ROLES.forEach(r=>{const holder=slot[r.key]&&slot[r.key].id?slot[r.key]:null;const btn=document.createElement('button');const mine=holder&&currentUser&&holder.id===currentUser.id;
-      btn.className='role-btn'+(mine?' mine':holder?' taken':'');btn.innerHTML=`${r.label}<small>${holder?esc(holder.name):'－'}</small>`;
+    ROLES.forEach(r=>{const cell=slot[r.key]||null;const holder=cell&&cell.id?cell:null;const locked=cell&&cell.locked;const btn=document.createElement('button');const mine=holder&&currentUser&&holder.id===currentUser.id;
+      btn.className='role-btn'+(mine?' mine':holder?' taken':'')+(locked?' locked':'');
+      let sub=holder?esc(holder.name)+(holder.byAdmin?' <span class="ba">代</span>':''):'－';if(locked)sub='🔒'+sub;
+      btn.innerHTML=`${r.label}<small>${sub}</small>`;
       btn.addEventListener('click',()=>{if(!requireAuth())return;toggleRole(sheetDay,slotId,r.key);});grid.appendChild(btn);});
     row.appendChild(grid);
     const memo=document.createElement('input');memo.className='memo';memo.dataset.slot=slotId;memo.placeholder='备注…（长按放大）';memo.value=slot.memo||'';memo.readOnly=!currentUser;
@@ -684,6 +698,8 @@ function renderShiftRows(){
   });
 }
 async function toggleRole(day,slotId,roleKey){
+  const _cell=(getSlotData(day,slotId)||{})[roleKey];
+  if(_cell&&_cell.locked){showBanner('此格已被管理员固定，无法修改');return;}
   const holder=roleHolder(day,slotId,roleKey);const path=`${monthPath()}/${day}/${slotId}/${roleKey}`;
   const s=slots[slotId]||{};const roleLbl=(ROLES.find(r=>r.key===roleKey)||{}).label||roleKey;
   if(holder&&holder.id===currentUser.id){await DB.remove(path);logEvent(currentRoomId,{action:'delete',target:`${viewMonth}/${day} ${banName(s)} ${roleLbl}`,before:currentUser.name,after:''});return;}
@@ -702,10 +718,17 @@ function openDetail(day,slotId){detailCtx={day,slotId};renderDetail();openSheet(
 function renderDetail(){
   if(!detailCtx)return;const{day,slotId}=detailCtx;const s=slots[slotId]||{};
   $('detail-title').textContent=`${viewMonth}月${day}日　${s.order?banLabel(s):''}`;
-  const slot=getSlotData(day,slotId)||{};const body=$('detail-body');body.innerHTML='';
-  ROLES.forEach(r=>{const holder=slot[r.key]&&slot[r.key].id?slot[r.key]:null;const sec=document.createElement('div');sec.className='detail-sec';
-    const rr=document.createElement('div');rr.className='name-row';rr.innerHTML=`<span class="nm"><b>${r.label}</b>　${holder?esc(holder.name):'<span class="none">未登记</span>'}</span>`;
-    if(holder&&currentUser&&currentUser.isMaster){const del=document.createElement('button');del.className='btn small danger';del.textContent='删除';del.onclick=()=>masterDeleteShift(day,slotId,r.key,holder);rr.appendChild(del);}
+  const slot=getSlotData(day,slotId)||{};const body=$('detail-body');body.innerHTML='';const isMaster=currentUser&&currentUser.isMaster;
+  ROLES.forEach(r=>{const cell=slot[r.key]||null;const holder=cell&&cell.id?cell:null;const locked=cell&&cell.locked;
+    const sec=document.createElement('div');sec.className='detail-sec';
+    const rr=document.createElement('div');rr.className='name-row';
+    let nm;if(holder)nm=esc(holder.name)+(holder.byAdmin?'<span class="byadmin-tag">管理者代登</span>':'')+(locked?'<span class="lock-tag">🔒固定</span>':'');else nm='<span class="none">未登记</span>'+(locked?'<span class="lock-tag">🔒固定</span>':'');
+    rr.innerHTML=`<span class="nm"><b>${r.label}</b>　${nm}</span>`;
+    if(isMaster){const ops=document.createElement('div');ops.style.cssText='display:flex;gap:5px;flex-shrink:0;align-items:center;';
+      if(holder){const del=document.createElement('button');del.className='btn small danger';del.textContent='删除';del.onclick=()=>masterDeleteShift(day,slotId,r.key,holder);ops.appendChild(del);}
+      else{const asg=document.createElement('button');asg.className='btn small';asg.textContent='代登';asg.onclick=()=>openAssignModal(day,slotId,r.key);ops.appendChild(asg);}
+      const lk=document.createElement('button');lk.className='btn small ghost';lk.textContent=locked?'🔓解锁':'🔒固定';lk.onclick=()=>toggleLock(day,slotId,r.key);ops.appendChild(lk);
+      rr.appendChild(ops);}
     sec.appendChild(rr);body.appendChild(sec);});
   if(slot.memo){const m=document.createElement('div');m.className='detail-sec';m.innerHTML=`<h4 style="font-size:13px;color:var(--text-dim);margin-bottom:6px;">备注</h4><div class="detail-memo">${esc(slot.memo)}</div>`;body.appendChild(m);}
 }
@@ -714,6 +737,36 @@ async function masterDeleteShift(day,slotId,roleKey,holder){
   await DB.remove(`${monthPath()}/${day}/${slotId}/${roleKey}`);
   if(holder.id!==MASTER_ID)await DB.set(`notifications/${holder.id}`,{flag:true,at:Date.now()});
   logEvent(currentRoomId,{action:'delete',target:`${viewMonth}/${day} ${banName(s)} ${roleLbl}`,before:holder.name,after:'',targetUser:holder.id});
+  renderDetail();
+}
+async function toggleLock(day,slotId,roleKey){
+  const path=`${monthPath()}/${day}/${slotId}/${roleKey}`;const cell=(getSlotData(day,slotId)||{})[roleKey]||null;
+  const s=slots[slotId]||{};const roleLbl=(ROLES.find(r=>r.key===roleKey)||{}).label||roleKey;
+  if(cell&&cell.locked){
+    if(cell.id){const c=Object.assign({},cell);delete c.locked;await DB.set(path,c);}else await DB.remove(path);
+    logEvent(currentRoomId,{action:'edit',target:`${viewMonth}/${day} ${banName(s)} ${roleLbl} 解锁`});
+  }else{
+    const base=cell&&cell.id?cell:{};await DB.set(path,Object.assign({},base,{locked:true}));
+    logEvent(currentRoomId,{action:'edit',target:`${viewMonth}/${day} ${banName(s)} ${roleLbl} 固定`});
+  }
+  renderDetail();
+}
+let assignCtx=null;
+async function openAssignModal(day,slotId,roleKey){
+  assignCtx={day,slotId,roleKey};const s=slots[slotId]||{};const roleLbl=(ROLES.find(r=>r.key===roleKey)||{}).label||roleKey;
+  $('assign-title').textContent=`代理登记 · ${viewMonth}/${day} ${banName(s)} ${roleLbl}`;
+  const users=await DB.get('users')||{};const list=$('assign-list');list.innerHTML='';
+  const entries=entriesOf(users).sort((a,b)=>(a[1].name||'').localeCompare(b[1].name||'','zh'));
+  if(!entries.length)list.innerHTML='<p class="muted" style="color:var(--text-dim);">暂无员工</p>';
+  entries.forEach(([uid,u])=>{const b=document.createElement('button');b.className='btn ghost';b.style.cssText='text-align:left;';b.textContent=u.name;b.onclick=()=>assignStaff(uid,u.name);list.appendChild(b);});
+  openModal('modal-assign');
+}
+async function assignStaff(uid,name){
+  if(!assignCtx)return;const{day,slotId,roleKey}=assignCtx;const path=`${monthPath()}/${day}/${slotId}/${roleKey}`;
+  const s=slots[slotId]||{};const roleLbl=(ROLES.find(r=>r.key===roleKey)||{}).label||roleKey;
+  await DB.set(path,{id:uid,name,byAdmin:true});
+  logEvent(currentRoomId,{action:'create',target:`${viewMonth}/${day} ${banName(s)} ${roleLbl}（代登）`,before:'',after:name});
+  closeModal('modal-assign');assignCtx=null;renderDetail();
 }
 
 /* ===== 我的班表 ===== */
@@ -722,15 +775,17 @@ function renderMyShift(){
   if(!currentUser)return;$('myshift-title').textContent=`我的班表 · ${roomNameTxt()} ${viewYear}年${viewMonth}月`;
   const body=$('myshift-body');body.innerHTML='';const items=[];
   entriesOf(monthData).forEach(([dayStr,dayData])=>{const day=parseInt(dayStr,10);if(!day||!dayData)return;
-    slotList().forEach(([slotId,s])=>{const slot=dayData[slotId];if(!slot)return;ROLES.forEach(r=>{const h=slot[r.key];if(h&&h.id===currentUser.id)items.push({day,slotId,roleKey:r.key,roleLabel:r.label,slotLabel:banLabel(s),time:s.time,order:s.order||0,checkIn:h.checkIn||null});});});});
+    slotList().forEach(([slotId,s])=>{const slot=dayData[slotId];if(!slot)return;ROLES.forEach(r=>{const h=slot[r.key];if(h&&h.id===currentUser.id)items.push({day,slotId,roleKey:r.key,roleLabel:r.label,slotLabel:banLabel(s),time:s.time,order:s.order||0,checkIn:h.checkIn||null,byAdmin:h.byAdmin,locked:h.locked});});});});
   items.sort((a,b)=>a.day-b.day||a.order-b.order);
   if(!items.length){body.innerHTML='<p class="muted" style="text-align:center;padding:30px 0;">本月暂无班次</p>';return;}
   items.forEach(it=>{const r=document.createElement('div');r.className='ms-row';
-    r.innerHTML=`<span class="d">${viewMonth}/${it.day}</span><span class="t">${esc(it.slotLabel)}　<span style="color:var(--text-dim)">${it.roleLabel}</span></span>`;
+    r.innerHTML=`<span class="d">${viewMonth}/${it.day}</span><span class="t">${esc(it.slotLabel)}　<span style="color:var(--text-dim)">${it.roleLabel}</span>${it.byAdmin?'<span class="byadmin-tag">管理者代登</span>':''}${it.locked?'<span class="lock-tag">🔒固定</span>':''}</span>`;
     const btns=document.createElement('div');btns.style.cssText='display:flex;flex-direction:column;gap:4px;flex-shrink:0;';
-    const del=document.createElement('button');del.className='btn small danger';del.textContent='删除';
+    if(it.locked){const lk=document.createElement('span');lk.style.cssText='font-size:11px;color:var(--text-dim);white-space:nowrap;';lk.textContent='🔒 固定中';btns.appendChild(lk);}
+    else{const del=document.createElement('button');del.className='btn small danger';del.textContent='删除';
     del.onclick=async()=>{const s=slots[it.slotId]||{};await DB.remove(`${monthPath()}/${it.day}/${it.slotId}/${it.roleKey}`);logEvent(currentRoomId,{action:'delete',target:`${viewMonth}/${it.day} ${banName(s)} ${it.roleLabel}`,before:currentUser.name,after:''});};
-    btns.appendChild(del);r.appendChild(btns);body.appendChild(r);});
+    btns.appendChild(del);}
+    r.appendChild(btns);body.appendChild(r);});
 }
 function roomNameTxt(){return $('room-name').textContent||'直播间';}
 
