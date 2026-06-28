@@ -83,8 +83,7 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
 .ban-row{flex:1;margin-top:1px;border-radius:3px;background:var(--red);display:flex;gap:1px;padding:1px;cursor:pointer;min-height:0;overflow:visible;touch-action:manipulation;position:relative;}
 .ban-row .rc{flex:1;min-width:0;border-radius:2px;display:flex;align-items:center;justify-content:center;font-size:7px;line-height:1;font-weight:500;white-space:nowrap;overflow:hidden;font-style:normal;}
 .ban-row .rc.on{background:rgba(255,255,255,.6);}
-.ban-row .ef{flex:0.75;display:flex;flex-direction:column;gap:1px;min-width:0;}
-.ban-row .ef .rc{flex:1;font-size:6px;}
+.day-lock{font-size:9px;margin-left:1px;vertical-align:middle;}
 .ban-row .ban-div{flex:0 0 1.5px;width:1.5px;align-self:stretch;background:rgba(0,0,0,.3);border-radius:0;}
 .ban-row .memoflag{position:absolute;top:50%;right:-5px;transform:translateY(-50%);width:5px;height:5px;border-radius:50%;background:#c0392b;pointer-events:none;z-index:2;}
 #fab-myshift{position:fixed;right:14px;bottom:18px;z-index:20;border:none;border-radius:24px;padding:12px 20px;background:var(--ink);color:#fff;font-size:15px;font-weight:700;font-family:inherit;box-shadow:0 5px 16px rgba(0,0,0,.3),0 2px 0 #000;cursor:pointer;}
@@ -640,7 +639,7 @@ function requireAuth(){if(currentUser)return true;openModal('modal-auth');return
 function updateHeaderUI(){const logged=!!currentUser;$('btn-register').style.display=logged?'none':'';$('btn-login').style.display=logged?'none':'';$('btn-logout').style.display=logged?'':'none';$('btn-admin').style.display=(logged&&currentUser.isMaster)?'':'none';$('btn-account').style.display=(logged&&!currentUser.isMaster)?'':'none';$('btn-messages').style.display=(logged&&!currentUser.isMaster)?'':'none';$('cal-uname').textContent=logged?(currentUser.isMaster?'👑 '+currentUser.name:currentUser.name):'';$('fab-myshift').style.display=logged?'':'none';updateMsgBadge();}
 
 /* ===== 订阅 ===== */
-function subscribeMonth(){if(unsubMonth)unsubMonth();unsubMonth=DB.watch(monthPath(),val=>{monthData=val||{};renderCalendar();refreshOpenViews();});}
+function subscribeMonth(){if(unsubMonth)unsubMonth();unsubMonth=DB.watch(monthPath(),val=>{monthData=val||{};normalizeMonth();renderCalendar();refreshOpenViews();});}
 function subscribeSlots(){if(unsubSlots)unsubSlots();unsubSlots=DB.watch(slotsPath(),val=>{slots=val||JSON.parse(JSON.stringify(DEFAULT_SLOTS));renderBanLegend();renderCalendar();refreshOpenViews();});}
 function navMonth(d){let y=viewYear,m=viewMonth+d;if(m<1){m=12;y--;}if(m>12){m=1;y++;}if(y<2026)return;viewYear=y;viewMonth=m;closeAllSheets();subscribeMonth();renderCalendar();}
 
@@ -660,7 +659,7 @@ function renderCalendar(){
   for(let i=0;i<first;i++)grid.appendChild(adjCell(prevDays-first+1+i));
   for(let day=1;day<=days;day++){
     const cell=document.createElement('div');cell.className='day-cell'+(isThis&&today.getDate()===day?' today':'');
-    const dn=document.createElement('div');dn.className='dnum';dn.textContent=day;cell.appendChild(dn);
+    const dn=document.createElement('div');dn.className='dnum';dn.textContent=day;if(isDayPartlyLocked(day))dn.innerHTML=day+'<span class="day-lock">🔒</span>';cell.appendChild(dn);
     sl.forEach(([slotId])=>{
       const row=document.createElement('div');row.className='ban-row';row.style.background=banRowColor(day,slotId);
       const slot=getSlotData(day,slotId);
@@ -668,7 +667,7 @@ function renderCalendar(){
       const banDiv=()=>{const d=document.createElement('i');d.className='ban-div';return d;};
       row.appendChild(roleCell('A'));row.appendChild(roleCell('B'));row.appendChild(banDiv());
       row.appendChild(roleCell('C'));row.appendChild(banDiv());
-      const ef=document.createElement('span');ef.className='ef';['E','F'].forEach(k=>ef.appendChild(roleCell(k)));row.appendChild(ef);
+      row.appendChild(roleCell('E'));row.appendChild(roleCell('F'));
       if(slot&&slot.memo){const fl=document.createElement('i');fl.className='memoflag';row.appendChild(fl);}
       addPress(row,()=>openShiftSheet(day),()=>openDetail(day,slotId));
       cell.appendChild(row);
@@ -678,11 +677,24 @@ function renderCalendar(){
   }
   const trail=(7-(first+days)%7)%7;for(let i=1;i<=trail;i++)grid.appendChild(adjCell(i));
 }
-function addPress(el,onTap,onLong){let timer=null,fired=false,moved=false,sx=0,sy=0;
-  el.addEventListener('pointerdown',e=>{fired=false;moved=false;sx=e.clientX;sy=e.clientY;timer=setTimeout(()=>{if(!moved){fired=true;onLong();}},550);});
-  el.addEventListener('pointermove',e=>{if(Math.abs(e.clientX-sx)>10||Math.abs(e.clientY-sy)>10){moved=true;clearTimeout(timer);}});
-  el.addEventListener('pointerup',()=>{clearTimeout(timer);if(!fired&&!moved)onTap();});
+function isDayPartlyLocked(day){for(const[slotId]of slotList()){const slot=getSlotData(day,slotId)||{};for(const r of ROLES){if(slot[r.key]&&slot[r.key].locked)return true;}}return false;}
+let _normalizing=false;
+function normalizeMonth(){
+  if(_normalizing)return;_normalizing=true;
+  (async()=>{try{const days=new Date(viewYear,viewMonth,0).getDate();for(let day=1;day<=days;day++){for(const[slotId]of slotList())await normalizeSlot(day,slotId);}}finally{_normalizing=false;}})();
+}
+async function normalizeSlot(day,slotId){
+  const slot=getSlotData(day,slotId);if(!slot)return;const base=`${monthPath()}/${day}/${slotId}`;
+  for(const[a,b]of [['A','B'],['E','F']]){const ca=slot[a],cb=slot[b];
+    if(!(ca&&ca.id)&&(cb&&cb.id)){if(ca&&ca.locked)continue;await DB.set(`${base}/${a}`,cb);await DB.remove(`${base}/${b}`);}}
+}
+function addPress(el,onTap,onLong){let timer=null,fired=false,moved=false,sx=0,sy=0,clickTimer=null;
+  el.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse')return;fired=false;moved=false;sx=e.clientX;sy=e.clientY;timer=setTimeout(()=>{if(!moved){fired=true;onLong();}},550);});
+  el.addEventListener('pointermove',e=>{if(e.pointerType==='mouse')return;if(Math.abs(e.clientX-sx)>10||Math.abs(e.clientY-sy)>10){moved=true;clearTimeout(timer);}});
+  el.addEventListener('pointerup',e=>{if(e.pointerType==='mouse')return;clearTimeout(timer);if(!fired&&!moved)onTap();});
   el.addEventListener('pointerleave',()=>clearTimeout(timer));el.addEventListener('pointercancel',()=>clearTimeout(timer));
+  el.addEventListener('click',e=>{if(e.pointerType&&e.pointerType!=='mouse')return;if(clickTimer)return;clickTimer=setTimeout(()=>{clickTimer=null;onTap();},250);});
+  el.addEventListener('dblclick',e=>{e.preventDefault();if(clickTimer){clearTimeout(clickTimer);clickTimer=null;}onLong();});
   el.addEventListener('contextmenu',e=>e.preventDefault());
 }
 function toggleStaffList(){const sl=$('staff-list');const btn=sl.previousElementSibling;const open=sl.classList.toggle('open');btn.textContent=open?'▲ 收起':'▼ 人员一览';if(open)buildStaffList();}
@@ -755,16 +767,22 @@ function saveMemoBig(){if(memoCtx)saveMemo(memoCtx.day,memoCtx.slotId,$('memo-bi
 
 /* ===== 班次详情 ===== */
 function openDetail(day,slotId){detailCtx={day,slotId};renderDetail();openSheet('sheet-detail');}
+function detailNavDay(d){if(!detailCtx)return;const days=new Date(viewYear,viewMonth,0).getDate();let nd=detailCtx.day+d;if(nd<1)nd=1;if(nd>days)nd=days;detailCtx.day=nd;renderDetail();}
+function detailNavSlot(d){if(!detailCtx)return;const ids=slotList().map(s=>s[0]);let i=ids.indexOf(detailCtx.slotId);if(i<0)return;i+=d;if(i<0)i=0;if(i>=ids.length)i=ids.length-1;detailCtx.slotId=ids[i];renderDetail();}
 function renderDetail(){
   if(!detailCtx)return;const{day,slotId}=detailCtx;const s=slots[slotId]||{};
   $('detail-title').textContent=`${viewMonth}月${day}日　${s.order?banLabel(s):''}`;
   const slot=getSlotData(day,slotId)||{};const body=$('detail-body');body.innerHTML='';const isMaster=currentUser&&currentUser.isMaster;
-  if(isMaster){const bar=document.createElement('div');bar.style.cssText='display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;';
+  const bar=document.createElement('div');bar.style.cssText='display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;align-items:center;';
+  if(isMaster){
     const dayLocked=isDayLocked(day);
     const b1=document.createElement('button');b1.className='btn small ghost';b1.textContent=dayLocked?'📌 解除这天全部固定':'📌 固定这一整天';
     b1.onclick=async()=>{if(!confirm(dayLocked?`解除 ${viewMonth}/${day} 全部固定？`:`固定 ${viewMonth}/${day} 整天（全部班次·全部格）？`))return;await lockDay(day,!dayLocked);logEvent(currentRoomId,{action:'edit',target:`${viewMonth}/${day} 整天${dayLocked?'解锁':'固定'}`});renderDetail();renderCalendar();};bar.appendChild(b1);
     const b2=document.createElement('button');b2.className='btn small ghost';b2.textContent='📅 按期间固定';b2.onclick=()=>openLockRange();bar.appendChild(b2);
-    body.appendChild(bar);}
+  }
+  const nav=document.createElement('div');nav.style.cssText='display:flex;gap:4px;margin-left:auto;';
+  [['◀',()=>detailNavDay(-1)],['▶',()=>detailNavDay(1)],['▲',()=>detailNavSlot(-1)],['▼',()=>detailNavSlot(1)]].forEach(([t,fn])=>{const nb=document.createElement('button');nb.className='btn small ghost';nb.textContent=t;nb.style.padding='4px 9px';nb.onclick=fn;nav.appendChild(nb);});
+  bar.appendChild(nav);body.appendChild(bar);
   ROLES.forEach(r=>{const cell=slot[r.key]||null;const holder=cell&&cell.id?cell:null;const locked=cell&&cell.locked;
     const sec=document.createElement('div');sec.className='detail-sec';
     const rr=document.createElement('div');rr.className='name-row';
