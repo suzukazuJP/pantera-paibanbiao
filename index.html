@@ -83,7 +83,8 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
 .ban-row{flex:1;margin-top:1px;border-radius:3px;background:var(--red);display:flex;gap:1px;padding:1px;cursor:pointer;min-height:0;overflow:visible;touch-action:manipulation;position:relative;}
 .ban-row .rc{flex:1;min-width:0;border-radius:2px;display:flex;align-items:center;justify-content:center;font-size:7px;line-height:1;font-weight:500;white-space:nowrap;overflow:hidden;font-style:normal;}
 .ban-row .rc.on{background:rgba(255,255,255,.6);}
-.day-lock{font-size:9px;margin-left:1px;vertical-align:middle;}
+.day-cell .dnum{display:flex;align-items:center;justify-content:center;gap:1px;}
+.day-lock{font-size:10px;line-height:1;}
 .ban-row .ban-div{flex:0 0 1.5px;width:1.5px;align-self:stretch;background:rgba(0,0,0,.3);border-radius:0;}
 .ban-row .memoflag{position:absolute;top:50%;right:-5px;transform:translateY(-50%);width:5px;height:5px;border-radius:50%;background:#c0392b;pointer-events:none;z-index:2;}
 #fab-myshift{position:fixed;right:14px;bottom:18px;z-index:20;border:none;border-radius:24px;padding:12px 20px;background:var(--ink);color:#fff;font-size:15px;font-weight:700;font-family:inherit;box-shadow:0 5px 16px rgba(0,0,0,.3),0 2px 0 #000;cursor:pointer;}
@@ -686,7 +687,7 @@ function normalizeMonth(){
 async function normalizeSlot(day,slotId){
   const slot=getSlotData(day,slotId);if(!slot)return;const base=`${monthPath()}/${day}/${slotId}`;
   for(const[a,b]of [['A','B'],['E','F']]){const ca=slot[a],cb=slot[b];
-    if(!(ca&&ca.id)&&(cb&&cb.id)){if(ca&&ca.locked)continue;await DB.set(`${base}/${a}`,cb);await DB.remove(`${base}/${b}`);}}
+    if(!(ca&&ca.id)&&(cb&&cb.id)){await DB.set(`${base}/${a}`,cb);await DB.remove(`${base}/${b}`);}}
 }
 function addPress(el,onTap,onLong){let timer=null,fired=false,moved=false,sx=0,sy=0,clickTimer=null;
   el.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse')return;fired=false;moved=false;sx=e.clientX;sy=e.clientY;timer=setTimeout(()=>{if(!moved){fired=true;onLong();}},550);});
@@ -780,8 +781,17 @@ function renderDetail(){
     b1.onclick=async()=>{if(!confirm(dayLocked?`解除 ${viewMonth}/${day} 全部固定？`:`固定 ${viewMonth}/${day} 整天（全部班次·全部格）？`))return;await lockDay(day,!dayLocked);logEvent(currentRoomId,{action:'edit',target:`${viewMonth}/${day} 整天${dayLocked?'解锁':'固定'}`});renderDetail();renderCalendar();};bar.appendChild(b1);
     const b2=document.createElement('button');b2.className='btn small ghost';b2.textContent='📅 按期间固定';b2.onclick=()=>openLockRange();bar.appendChild(b2);
   }
-  const nav=document.createElement('div');nav.style.cssText='display:flex;gap:4px;margin-left:auto;';
-  [['◀',()=>detailNavDay(-1)],['▶',()=>detailNavDay(1)],['▲',()=>detailNavSlot(-1)],['▼',()=>detailNavSlot(1)]].forEach(([t,fn])=>{const nb=document.createElement('button');nb.className='btn small ghost';nb.textContent=t;nb.style.padding='4px 9px';nb.onclick=fn;nav.appendChild(nb);});
+  const days=new Date(viewYear,viewMonth,0).getDate();const ids=slotList();const slotIdx=ids.findIndex(x=>x[0]===slotId);
+  const mkNav=(t,fn,dis,big)=>{const b=document.createElement('button');b.className='btn small ghost';b.textContent=t;b.style.cssText=`padding:4px ${big?9:7}px;font-size:${big?18:11}px;line-height:1;`+(dis?'opacity:.25;pointer-events:none;':'');if(!dis)b.onclick=fn;return b;};
+  const mkLbl=(t,w)=>{const sp=document.createElement('span');sp.textContent=t;sp.style.cssText=`font-size:13px;min-width:${w}px;text-align:center;color:var(--ink);`;return sp;};
+  const nav=document.createElement('div');nav.style.cssText='display:flex;align-items:center;gap:3px;';
+  nav.appendChild(mkNav('◀',()=>detailNavDay(-1),day<=1,false));
+  nav.appendChild(mkLbl(`${viewMonth}/${day}`,42));
+  nav.appendChild(mkNav('▶',()=>detailNavDay(1),day>=days,false));
+  const gap=document.createElement('span');gap.style.cssText='display:inline-block;width:22px;';nav.appendChild(gap);
+  nav.appendChild(mkNav('▲',()=>detailNavSlot(-1),slotIdx<=0,true));
+  nav.appendChild(mkLbl(`${s.order||'-'}班`,30));
+  nav.appendChild(mkNav('▼',()=>detailNavSlot(1),slotIdx>=ids.length-1,true));
   bar.appendChild(nav);body.appendChild(bar);
   ROLES.forEach(r=>{const cell=slot[r.key]||null;const holder=cell&&cell.id?cell:null;const locked=cell&&cell.locked;
     const sec=document.createElement('div');sec.className='detail-sec';
