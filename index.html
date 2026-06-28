@@ -176,10 +176,10 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
 .msg-meta{font-size:11px;color:var(--text-dim);}
 .msg-foot{margin-top:8px;display:flex;justify-content:flex-end;}
 .msg-done{font-size:12px;color:#1a7a45;font-weight:600;}
-.color-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
-.color-row .cn-sw{width:20px;height:20px;border-radius:4px;border:1px solid var(--line);flex-shrink:0;}
-.color-row .color-name{flex:1;font-size:13px;}
-.color-row input[type=color]{width:42px;height:30px;border:1px solid var(--line);border-radius:6px;cursor:pointer;padding:1px;background:none;}
+.status-bar{display:flex;gap:5px;flex-wrap:wrap;align-items:center;margin-bottom:10px;}
+.status-bar .sb-btn{padding:3px 10px 3px 8px;font-size:12px;border-radius:7px;border:1px solid var(--line);background:var(--card);cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;}
+.status-bar .sb-btn .sw{width:12px;height:12px;border-radius:3px;display:inline-block;}
+.status-bar .sb-btn.on{border-color:var(--ink);font-weight:700;box-shadow:inset 0 0 0 1px var(--ink);}
 </style>
 </head>
 <body>
@@ -351,11 +351,6 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
       <div style="display:flex;gap:8px;margin-top:6px;"><button class="btn small" onclick="saveSlots()">保存班次时间</button><button class="btn small ghost" onclick="adminAddSlot()">＋ 添加班次</button></div>
       <span class="muted" id="adm-slots-msg"></span>
       <p class="muted" style="margin-top:6px;font-size:12px;">删除班次会清除该班次本月的全部排班数据（60秒内可撤销）。</p>
-    </div>
-    <div class="adm-sec">
-      <h4>颜色设置（班次格子颜色）</h4>
-      <div id="adm-colors"></div>
-      <p class="muted" style="margin-top:4px;font-size:12px;">点颜色块更换；改动对所有人即时生效，「默认」可恢复。</p>
     </div>
     <div class="adm-sec">
       <h4>员工管理</h4>
@@ -655,13 +650,10 @@ function navMonth(d){let y=viewYear,m=viewMonth+d;if(m<1){m=12;y--;}if(m>12){m=1
 
 /* ===== 日历 ===== */
 function renderBanLegend(){$('ban-legend').innerHTML=slotList().map(([,s])=>`<div>${CIRCLED[s.order-1]||s.order}${esc(s.time)}</div>`).join('');}
-function banRowColor(day,slotId){const s=getSlotData(day,slotId);const has=k=>(s&&s[k]&&s[k].id)?1:0;const G=has('A')+has('B'),H=has('C'),I=has('E')+has('F');const groups=(G>0?1:0)+(H>0?1:0)+(I>0?1:0);if(groups===0){const hasLock=ROLES.some(r=>s&&s[r.key]&&s[r.key].locked);return hasLock?'var(--gray-lock)':'var(--red)';}if(groups===1)return'var(--yellow)';if(G===1&&H===1)return'var(--green)';return'var(--blue)';}
-let colorCfg={}, unsubColors=null;
-const COLOR_DEF={green:'#a8e6c1',yellow:'#f9e4a0',red:'#f5a8a8',blue:'#a9c9f5',gray:'#cfcfcf'};
-function applyColors(c){c=c||{};const map={green:'--green',yellow:'--yellow',red:'--red',blue:'--blue',gray:'--gray-lock'};for(const k in map)document.documentElement.style.setProperty(map[k],c[k]||COLOR_DEF[k]);}
-function subscribeColors(){if(unsubColors)unsubColors();unsubColors=DB.watch(`rooms/${currentRoomId}/colors`,val=>{colorCfg=val||{};applyColors(colorCfg);renderColorSettings();renderCalendar();});}
-async function setColor(key,value){await DB.set(`rooms/${currentRoomId}/colors/${key}`,value);}
-function renderColorSettings(){const wrap=$('adm-colors');if(!wrap)return;const labels={green:'主播·中控已齐',blue:'需协调',yellow:'缺一方',red:'无人',gray:'固定·无人'};const c=colorCfg||{};wrap.innerHTML=Object.keys(labels).map(k=>`<div class="color-row"><span class="cn-sw" style="background:${c[k]||COLOR_DEF[k]}"></span><span class="color-name">${labels[k]}</span><input type="color" value="${c[k]||COLOR_DEF[k]}" onchange="setColor('${k}',this.value)"><button class="btn small ghost" onclick="setColor('${k}','${COLOR_DEF[k]}')">默认</button></div>`).join('');}
+function banRowColor(day,slotId){const s=getSlotData(day,slotId);if(s&&s._status&&STATUS_COLOR[s._status])return STATUS_COLOR[s._status];const has=k=>(s&&s[k]&&s[k].id)?1:0;const G=has('A')+has('B'),H=has('C'),I=has('E')+has('F');const groups=(G>0?1:0)+(H>0?1:0)+(I>0?1:0);if(groups===0){const hasLock=ROLES.some(r=>s&&s[r.key]&&s[r.key].locked);return hasLock?'var(--gray-lock)':'var(--red)';}if(groups===1)return'var(--yellow)';if(G===1&&H===1)return'var(--green)';return'var(--blue)';}
+const STATUS_COLOR={green:'var(--green)',blue:'var(--blue)',yellow:'var(--yellow)',red:'var(--red)'};
+const STATUS_LABEL={green:'已齐',blue:'需协调',yellow:'缺一方',red:'无人'};
+async function setSlotStatus(day,slotId,status){const path=`${monthPath()}/${day}/${slotId}/_status`;if(status)await DB.set(path,status);else await DB.remove(path);const s=slots[slotId]||{};logEvent(currentRoomId,{action:'edit',target:`${viewMonth}/${day} ${banName(s)} 状态=${status?STATUS_LABEL[status]:'自动'}`});renderDetail();renderCalendar();}
 function renderCalendar(){
   $('month-label').textContent=`${viewYear}年${viewMonth}月`;
   $('nav-prev').disabled=(viewYear===2026&&viewMonth===1);
@@ -808,6 +800,11 @@ function renderDetail(){
   nav.appendChild(mkLbl(`${s.order||'-'}班`,30));
   nav.appendChild(mkNav('▼',()=>detailNavSlot(1),slotIdx>=ids.length-1,true));
   bar.appendChild(nav);body.appendChild(bar);
+  if(isMaster){const sbar=document.createElement('div');sbar.className='status-bar';
+    const lbl=document.createElement('span');lbl.textContent='颜色/状态：';lbl.style.cssText='font-size:12px;color:var(--text-dim);';sbar.appendChild(lbl);
+    const cur=slot._status||'';
+    [['green','已齐'],['blue','需协调'],['yellow','缺一方'],['red','无人'],['','自动']].forEach(([st,lb])=>{const sb=document.createElement('button');sb.className='sb-btn'+(cur===st?' on':'');if(st)sb.innerHTML=`<span class="sw" style="background:var(--${st})"></span>${lb}`;else sb.textContent=lb;sb.onclick=()=>setSlotStatus(day,slotId,st);sbar.appendChild(sb);});
+    body.appendChild(sbar);}
   ROLES.forEach(r=>{const cell=slot[r.key]||null;const holder=cell&&cell.id?cell:null;const locked=cell&&cell.locked;
     const sec=document.createElement('div');sec.className='detail-sec';
     const rr=document.createElement('div');rr.className='name-row';
@@ -938,7 +935,7 @@ function renderMyShift(){
 function roomNameTxt(){return $('room-name').textContent||'直播间';}
 
 /* ===== 管理面板（班次/员工/总览） ===== */
-function openAdmin(){renderAdminSlots();renderAdminUsers();renderAdminShifts();renderColorSettings();openSheet('sheet-admin');}
+function openAdmin(){renderAdminSlots();renderAdminUsers();renderAdminShifts();openSheet('sheet-admin');}
 function renderAdminSlots(){const wrap=$('adm-slots');if($('adm-slot-room'))$('adm-slot-room').textContent=roomNameTxt();wrap.innerHTML='';
   slotList().forEach(([slotId,s],idx)=>{const row=document.createElement('div');row.className='adm-slot';row.innerHTML=`<span>${idx+1}班</span>`;
     const input=document.createElement('input');input.value=s.time;input.dataset.slot=slotId;row.appendChild(input);
@@ -1014,7 +1011,7 @@ async function ensureRoom(){
 (async function init(){
   const now=new Date();viewYear=Math.max(now.getFullYear(),2026);viewMonth=now.getFullYear()>=2026?now.getMonth()+1:1;
   await ensureRoom();
-  subscribeSlots();subscribeMonth();subscribeColors();setupCalendarSwipe();
+  subscribeSlots();subscribeMonth();setupCalendarSwipe();
   const saved=loadSession();if(saved){enterApp(saved);return;}updateHeaderUI();
 })();
 function bumpSession(){if(currentUser)saveSession(currentUser);}
