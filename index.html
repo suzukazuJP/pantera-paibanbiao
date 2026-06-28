@@ -165,7 +165,7 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
 .lock-tag{display:inline-block;color:#9a6a1e;font-size:11px;font-weight:700;margin-left:6px;vertical-align:middle;white-space:nowrap;}
 .role-btn.locked{opacity:.6;background:#efeae0;}
 .role-btn .ba{color:#e8821e;font-weight:700;}
-#assign-list .btn{width:100%;}
+#assign-list .btn,#change-list .btn{width:100%;}
 .msg-badge{position:absolute;top:-5px;right:-5px;background:#c0392b;color:#fff;border-radius:9px;min-width:16px;height:16px;font-size:10px;line-height:16px;text-align:center;padding:0 3px;font-weight:700;}
 .msg-card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px;}
 .msg-card.unread{border-color:#3a6ea5;background:#eef4fb;}
@@ -264,6 +264,15 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
   <p class="muted" style="font-size:12px;margin-bottom:8px;color:var(--text-dim);">填写理由后会通知该员工（可留空）。</p>
   <textarea id="delr-reason" placeholder="删除理由（例：临时调整）" style="width:100%;min-height:80px;padding:10px 12px;border-radius:8px;border:1px solid #d5d5d5;background:#fff;color:var(--ink);font-size:15px;font-family:inherit;outline:none;resize:vertical;box-sizing:border-box;"></textarea>
   <div class="row"><button class="btn ghost" onclick="closeModal('modal-delreason')">取消</button><button class="btn danger" onclick="confirmDelete()">删除</button></div>
+</div></div>
+
+<div class="overlay" id="modal-change" style="z-index:90;"><div class="modal">
+  <h2 id="change-title">变更班次</h2>
+  <p class="muted" style="font-size:12px;margin-bottom:8px;color:var(--text-dim);">填写理由 → 选择变更后的员工。原登记人会收到「班次变更」通知。</p>
+  <textarea id="change-reason" placeholder="变更理由（例：临时调整）" style="width:100%;min-height:60px;padding:10px 12px;border-radius:8px;border:1px solid #d5d5d5;background:#fff;color:var(--ink);font-size:15px;font-family:inherit;outline:none;resize:vertical;box-sizing:border-box;margin-bottom:10px;"></textarea>
+  <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">选择变更后的员工：</div>
+  <div id="change-list" style="display:flex;flex-direction:column;gap:6px;max-height:38vh;overflow:auto;"></div>
+  <div class="row"><button class="btn ghost" onclick="closeModal('modal-change')">取消</button></div>
 </div></div>
 
 <div id="screen-calendar" class="screen show">
@@ -762,7 +771,7 @@ function renderDetail(){
     let nm;if(holder)nm=esc(holder.name)+(holder.byAdmin?'<span class="byadmin-tag">管理者代登</span>':'')+(locked?'<span class="lock-tag">🔒固定</span>':'');else nm='<span class="none">未登记</span>'+(locked?'<span class="lock-tag">🔒固定</span>':'');
     rr.innerHTML=`<span class="nm"><b>${r.label}</b>　${nm}</span>`;
     if(isMaster){const ops=document.createElement('div');ops.style.cssText='display:flex;gap:5px;flex-shrink:0;align-items:center;';
-      if(holder){const del=document.createElement('button');del.className='btn small danger';del.textContent='删除';del.onclick=()=>openDelReason(day,slotId,r.key,holder);ops.appendChild(del);}
+      if(holder){const chg=document.createElement('button');chg.className='btn small';chg.textContent='变更';chg.onclick=()=>openChangeModal(day,slotId,r.key,holder);ops.appendChild(chg);const del=document.createElement('button');del.className='btn small danger';del.textContent='删除';del.onclick=()=>openDelReason(day,slotId,r.key,holder);ops.appendChild(del);}
       else{const asg=document.createElement('button');asg.className='btn small';asg.textContent='代登';asg.onclick=()=>openAssignModal(day,slotId,r.key);ops.appendChild(asg);}
       const lk=document.createElement('button');lk.className='btn small ghost';lk.textContent=locked?'🔓解锁':'🔒固定';lk.onclick=()=>toggleLock(day,slotId,r.key);ops.appendChild(lk);
       rr.appendChild(ops);}
@@ -785,6 +794,24 @@ async function doLockRange(lock){
   closeModal('modal-lockrange');renderCalendar();if(detailCtx)renderDetail();
 }
 let delCtx=null;
+let changeCtx=null;
+async function openChangeModal(day,slotId,roleKey,holder){
+  changeCtx={day,slotId,roleKey,oldHolder:holder};const s=slots[slotId]||{};const roleLbl=(ROLES.find(r=>r.key===roleKey)||{}).label||roleKey;
+  $('change-title').textContent=`变更：${viewMonth}/${day} ${banName(s)} ${roleLbl}（现：${esc(holder.name)}）`;$('change-reason').value='';
+  const users=await DB.get('users')||{};const list=$('change-list');list.innerHTML='';
+  const entries=entriesOf(users).sort((a,b)=>(a[1].name||'').localeCompare(b[1].name||'','zh'));
+  entries.forEach(([uid,u])=>{const b=document.createElement('button');b.className='btn ghost';b.style.cssText='text-align:left;';b.textContent=u.name+(uid===holder.id?'（当前）':'');b.onclick=()=>confirmChange(uid,u.name);list.appendChild(b);});
+  openModal('modal-change');
+}
+async function confirmChange(newUid,newName){
+  if(!changeCtx)return;const{day,slotId,roleKey,oldHolder}=changeCtx;const reason=$('change-reason').value.trim();
+  if(newUid===oldHolder.id){showBanner('和原来是同一个人，未变更');return;}
+  const s=slots[slotId]||{};const roleLbl=(ROLES.find(r=>r.key===roleKey)||{}).label||roleKey;const slotLabel=`${viewMonth}/${day} ${banName(s)} ${roleLbl}`;
+  await DB.set(`${monthPath()}/${day}/${slotId}/${roleKey}`,{id:newUid,name:newName,byAdmin:true});
+  if(oldHolder.id!==MASTER_ID)await sendMessage({toType:'users',toUsers:{[oldHolder.id]:true},kind:'change',title:'你的班次被变更',body:`${slotLabel}（原：${oldHolder.name}）已被管理员变更为 ${newName}。`+(reason?`\n变更理由：${reason}`:'')});
+  logEvent(currentRoomId,{action:'edit',target:`${slotLabel} 变更`,before:oldHolder.name,after:newName+(reason?` 理由:${reason}`:'')});
+  closeModal('modal-change');changeCtx=null;renderDetail();
+}
 function openDelReason(day,slotId,roleKey,holder){delCtx={day,slotId,roleKey,holder};const s=slots[slotId]||{};const roleLbl=(ROLES.find(r=>r.key===roleKey)||{}).label||roleKey;$('delr-title').textContent=`删除：${viewMonth}/${day} ${banName(s)} ${roleLbl}（${esc(holder.name)}）`;$('delr-reason').value='';openModal('modal-delreason');}
 async function confirmDelete(){
   if(!delCtx)return;const{day,slotId,roleKey,holder}=delCtx;const reason=$('delr-reason').value.trim();
