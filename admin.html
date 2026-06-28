@@ -85,6 +85,17 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
 .late-dd li{padding:4px 8px;color:#e08a8a;border-bottom:1px solid var(--line);white-space:nowrap;}
 .late-dd li:last-child{border-bottom:none;}
 .late-toggle{background:var(--panel2);color:var(--accent);border:1px solid var(--line);border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;}
+.msg-compose{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:8px;}
+#msg-title,#msg-body{width:100%;box-sizing:border-box;}
+#msg-body{font-family:inherit;background:#0b0d11;border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:7px 10px;font-size:13px;outline:none;resize:vertical;}
+.msg-chip{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:3px 9px;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;color:var(--ink);}
+.msg-item{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px;}
+.msg-item-top{font-size:14px;margin-bottom:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--ink);}
+.msg-to-label{font-size:11px;color:var(--dim);}
+.msg-item-body{font-size:13px;color:var(--ink);white-space:pre-wrap;line-height:1.5;margin-bottom:8px;}
+.msg-item-read{font-size:12px;color:var(--dim);line-height:1.6;}
+.msg-kind-a{font-size:10px;font-weight:700;border-radius:4px;padding:1px 6px;color:#fff;}
+.msg-kind-a.del{background:#b0413a;}.msg-kind-a.chg{background:#caa64a;color:#1a1a1a;}
 </style>
 </head>
 <body>
@@ -111,6 +122,7 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
     <button class="tab" data-tab="users" onclick="switchTab('users')">员工</button>
     <button class="tab" data-tab="late" onclick="switchTab('late')">迟到统计</button>
     <button class="tab" data-tab="rooms" onclick="switchTab('rooms')">直播间管理</button>
+    <button class="tab" data-tab="messages" onclick="switchTab('messages')">消息</button>
   </div>
   <main>
     <!-- logs -->
@@ -159,6 +171,21 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
     </div>
     <!-- rooms -->
     <div class="panel" id="panel-rooms"><div class="scroll" id="rooms-scroll"></div></div>
+    <div class="panel" id="panel-messages"><div class="scroll" id="msg-scroll">
+      <div class="msg-compose">
+        <h4 style="color:var(--accent);font-size:14px;margin-bottom:10px;">发送消息（<span id="msg-scope-label"></span>）</h4>
+        <div style="display:flex;gap:16px;margin-bottom:10px;font-size:13px;">
+          <label><input type="radio" name="msgto" value="all" checked onchange="renderMsgTargets()"> 全部员工</label>
+          <label><input type="radio" name="msgto" value="users" onchange="renderMsgTargets()"> 指定员工</label>
+        </div>
+        <div id="msg-targets" style="display:none;flex-wrap:wrap;gap:6px;margin-bottom:10px;"></div>
+        <input id="msg-title" placeholder="标题（例：本周注意事项）" style="margin-bottom:8px;">
+        <textarea id="msg-body" placeholder="消息内容…" style="min-height:80px;margin-bottom:10px;"></textarea>
+        <button class="btn-s b-blue" onclick="sendAdminMessage()">发送</button>
+      </div>
+      <h4 style="color:var(--accent);font-size:14px;margin:18px 0 10px;">已发送的消息</h4>
+      <div id="msg-list"></div>
+    </div></div>
   </main>
 </div>
 
@@ -225,6 +252,7 @@ function switchTab(t){
   else if(t==='users')loadUsers();
   else if(t==='late')loadLate();
   else if(t==='rooms')renderRooms();
+  else if(t==='messages')loadMessages();
 }
 
 /* ===== 迟到统计 ===== */
@@ -472,6 +500,52 @@ async function delOwner(id){if(!confirm('删除该直播间的商家账号？'))
 
 /* ===== boot ===== */
 if(sessionStorage.getItem('pantera_admin')==='1')startApp();
+
+/* ===== 消息（メッセージ） ===== */
+let msgUsers=[];
+async function loadMessages(){
+  $('msg-scope-label').textContent=scope==='all'?'全部直播间':((rooms[scope]||{}).name||scope);
+  const u=await DB.get('users');msgUsers=entriesOf(u).map(([k,x])=>({uid:k,name:x.name||k}));
+  renderMsgTargets();renderMsgList();
+}
+function renderMsgTargets(){
+  const to=document.querySelector('input[name="msgto"]:checked').value;const box=$('msg-targets');
+  if(to==='all'){box.style.display='none';return;}
+  box.style.display='flex';
+  box.innerHTML=msgUsers.length?msgUsers.map(u=>`<label class="msg-chip"><input type="checkbox" value="${esc(u.uid)}"> ${esc(u.name)}</label>`).join(''):'<span class="muted">暂无员工</span>';
+}
+async function sendAdminMessage(){
+  const title=$('msg-title').value.trim(),body=$('msg-body').value.trim();
+  if(!body){alert('请输入消息内容');return;}
+  const to=document.querySelector('input[name="msgto"]:checked').value;
+  let toUsers=null;
+  if(to==='users'){toUsers={};document.querySelectorAll('#msg-targets input:checked').forEach(c=>toUsers[c.value]=true);if(!Object.keys(toUsers).length){alert('请选择员工');return;}}
+  const ids=scopeRoomIds();if(!ids.length){alert('没有可发送的直播间');return;}
+  for(const rid of ids){const id='m_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);await DB.set(`rooms/${rid}/messages/${id}`,{from:'管理员',toType:to,toUsers,kind:'notice',title,body,createdAt:Date.now(),reads:{}});}
+  $('msg-title').value='';$('msg-body').value='';
+  alert('已发送（'+ids.length+' 个直播间）');renderMsgList();
+}
+async function renderMsgList(){
+  const ids=scopeRoomIds();const all=[];
+  for(const rid of ids){const ms=await DB.get(`rooms/${rid}/messages`);entriesOf(ms).forEach(([id,m])=>all.push(Object.assign({id,rid},m)));}
+  all.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  const box=$('msg-list');
+  if(!all.length){box.innerHTML='<p class="muted">暂无消息</p>';return;}
+  const nameOf=uid=>{const u=msgUsers.find(x=>x.uid===uid);return u?u.name:uid;};
+  box.innerHTML=all.map(m=>{
+    let targetUids=m.toType==='all'?msgUsers.map(u=>u.uid):(m.toUsers?Object.keys(m.toUsers):[]);
+    const readNames=targetUids.filter(uid=>m.reads&&m.reads[uid]).map(nameOf);
+    const unreadNames=targetUids.filter(uid=>!(m.reads&&m.reads[uid])).map(nameOf);
+    const toLabel=m.toType==='all'?'全部员工':('指定：'+(m.toUsers?Object.keys(m.toUsers).map(nameOf).join('、'):''));
+    const kindTag=m.kind==='delete'?' <span class="msg-kind-a del">删除通知</span>':m.kind==='change'?' <span class="msg-kind-a chg">变更通知</span>':'';
+    const roomTag=scope==='all'?` <span class="muted">[${esc((rooms[m.rid]||{}).name||m.rid)}]</span>`:'';
+    return `<div class="msg-item"><div class="msg-item-top"><b>${esc(m.title||'通知')}</b>${kindTag} <span class="msg-to-label">${esc(toLabel)}</span>${roomTag}</div>
+      <div class="msg-item-body">${esc(m.body||'')}</div>
+      <div class="msg-item-read"><b>已确认 ${readNames.length}/${targetUids.length}</b>：${readNames.map(esc).join('、')||'—'}　｜　<span style="color:#e08a8a;">未确认：${unreadNames.length?unreadNames.map(esc).join('、'):'全部已确认 ✓'}</span></div>
+      <div style="text-align:right;margin-top:6px;"><button class="btn-s b-red" onclick="deleteAdminMessage('${m.rid}','${m.id}')">删除</button></div></div>`;
+  }).join('');
+}
+async function deleteAdminMessage(rid,id){if(!confirm('删除这条消息？'))return;await DB.remove(`rooms/${rid}/messages/${id}`);renderMsgList();}
 </script>
 </body>
 </html>

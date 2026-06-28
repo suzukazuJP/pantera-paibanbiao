@@ -166,6 +166,16 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
 .role-btn.locked{opacity:.6;background:#efeae0;}
 .role-btn .ba{color:#e8821e;font-weight:700;}
 #assign-list .btn{width:100%;}
+.msg-badge{position:absolute;top:-5px;right:-5px;background:#c0392b;color:#fff;border-radius:9px;min-width:16px;height:16px;font-size:10px;line-height:16px;text-align:center;padding:0 3px;font-weight:700;}
+.msg-card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px;}
+.msg-card.unread{border-color:#3a6ea5;background:#eef4fb;}
+.msg-top{display:flex;align-items:center;gap:8px;font-size:15px;margin-bottom:6px;flex-wrap:wrap;}
+.msg-kind{font-size:10px;font-weight:700;border-radius:4px;padding:1px 6px;color:#fff;}
+.msg-kind.del{background:#c0392b;}.msg-kind.chg{background:#e8821e;}
+.msg-body{font-size:13px;color:var(--ink);line-height:1.6;white-space:pre-wrap;margin-bottom:8px;}
+.msg-meta{font-size:11px;color:var(--text-dim);}
+.msg-foot{margin-top:8px;display:flex;justify-content:flex-end;}
+.msg-done{font-size:12px;color:#1a7a45;font-weight:600;}
 </style>
 </head>
 <body>
@@ -241,6 +251,21 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
   <div class="row"><button class="btn ghost" onclick="closeModal('modal-assign')">取消</button></div>
 </div></div>
 
+<div class="overlay" id="modal-lockrange" style="z-index:90;"><div class="modal">
+  <h2>📅 按期间固定 / 解锁</h2>
+  <p class="muted" style="font-size:12px;margin-bottom:10px;color:var(--text-dim);">指定本月（<span id="lr-month"></span>）的日期范围，对范围内每天的全部班次·全部格生效。</p>
+  <div class="field"><label>开始日</label><input id="lr-from" type="number" min="1" max="31" placeholder="例：1"></div>
+  <div class="field" style="margin-top:8px;"><label>结束日</label><input id="lr-to" type="number" min="1" max="31" placeholder="例：10"></div>
+  <div class="row" style="margin-top:14px;"><button class="btn ghost" onclick="closeModal('modal-lockrange')">取消</button><button class="btn ghost" onclick="doLockRange(false)">🔓 解锁</button><button class="btn" onclick="doLockRange(true)">🔒 固定</button></div>
+</div></div>
+
+<div class="overlay" id="modal-delreason" style="z-index:90;"><div class="modal">
+  <h2 id="delr-title">删除班次</h2>
+  <p class="muted" style="font-size:12px;margin-bottom:8px;color:var(--text-dim);">填写理由后会通知该员工（可留空）。</p>
+  <textarea id="delr-reason" placeholder="删除理由（例：临时调整）" style="width:100%;min-height:80px;padding:10px 12px;border-radius:8px;border:1px solid #d5d5d5;background:#fff;color:var(--ink);font-size:15px;font-family:inherit;outline:none;resize:vertical;box-sizing:border-box;"></textarea>
+  <div class="row"><button class="btn ghost" onclick="closeModal('modal-delreason')">取消</button><button class="btn danger" onclick="confirmDelete()">删除</button></div>
+</div></div>
+
 <div id="screen-calendar" class="screen show">
   <div id="cal-header">
     <span class="uname" id="cal-uname"></span>
@@ -248,6 +273,7 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
     <button class="btn small" id="btn-register" onclick="openModal('modal-register')">注册</button>
     <button class="btn small ghost" id="btn-login" onclick="handleLoginClick()">登录</button>
     <button class="btn small ghost" id="btn-admin" style="display:none" onclick="openAdmin()">⚙ 管理</button>
+    <button class="btn small ghost" id="btn-messages" style="display:none;position:relative;" onclick="openMessages()">📬<span id="msg-badge" class="msg-badge" style="display:none;"></span></button>
     <button class="btn small ghost" id="btn-account" style="display:none" onclick="openAccountModal()">设置</button>
     <button class="btn small ghost" id="btn-logout" style="display:none" onclick="doLogout()">退出</button>
   </div>
@@ -286,6 +312,11 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
 <div class="sheet" id="sheet-myshift">
   <div class="sheet-header" data-swipe="sheet-myshift"><div class="sheet-grip"></div><h3 id="myshift-title">我的班表</h3><button class="sheet-close" onclick="closeSheet('sheet-myshift')">✕</button></div>
   <div class="sheet-body" id="myshift-body"></div>
+</div>
+
+<div class="sheet" id="sheet-messages" style="max-height:88vh;">
+  <div class="sheet-header" data-swipe="sheet-messages"><div class="sheet-grip"></div><h3>📬 消息通知</h3><button class="sheet-close" onclick="closeSheet('sheet-messages')">✕</button></div>
+  <div class="sheet-body" id="messages-body"></div>
 </div>
 
 <div class="sheet" id="sheet-manual" style="max-height:92vh;">
@@ -585,9 +616,9 @@ function reloginSwitch(){closeModal('modal-relogin');clearRemember();_remembered
 
 async function enterApp(user){
   currentUser=user;saveSession(user);updateHeaderUI();refreshOpenViews();renderCalendar();
-  if(!user.isMaster){startAttendance();const n=await DB.get(`notifications/${user.id}`);if(n){showBanner('您的班表已被管理员修改');DB.remove(`notifications/${user.id}`);}}
+  if(!user.isMaster){startAttendance();subscribeMessages();const n=await DB.get(`notifications/${user.id}`);if(n){showBanner('您的班表已被管理员修改'+(n.slotLabel?`（${n.slotLabel}）`:'')+(n.reason?`　理由：${n.reason}`:''));DB.remove(`notifications/${user.id}`);}setTimeout(()=>{if(unreadCount()>0)openMessages();},900);}
 }
-function doLogout(){stopAttendance();if(currentUser)logEvent(currentRoomId,{action:'logout',target:`${currentUser.name} 退出`});clearSession();currentUser=null;closeAllSheets();updateHeaderUI();renderCalendar();}
+function doLogout(){stopAttendance();unsubscribeMessages();if(currentUser)logEvent(currentRoomId,{action:'logout',target:`${currentUser.name} 退出`});clearSession();currentUser=null;closeAllSheets();updateHeaderUI();renderCalendar();}
 /* ===== 到岗/离岗（按IP判定studio网络。仅登录员工·应用打开时有效） ===== */
 let _attendAt=false,_attendTimer=null,_attendBusy=false;
 async function fetchPublicIp(){try{const r=await fetch('https://api.ipify.org?format=json',{cache:'no-store'});if(!r.ok)return null;const j=await r.json();return (j&&j.ip)||null;}catch(e){return null;}}
@@ -597,7 +628,7 @@ function _attendVis(){if(document.visibilityState==='visible')checkAttendance();
 function startAttendance(){stopAttendance();_attendAt=false;checkAttendance();_attendTimer=setInterval(checkAttendance,60000);window.addEventListener('online',checkAttendance);document.addEventListener('visibilitychange',_attendVis);}
 function stopAttendance(){if(_attendTimer)clearInterval(_attendTimer);_attendTimer=null;window.removeEventListener('online',checkAttendance);document.removeEventListener('visibilitychange',_attendVis);if(_attendAt&&currentUser&&!currentUser.isMaster){_attendAt=false;logEvent(currentRoomId,{action:'leave',target:'离岗'});}}
 function requireAuth(){if(currentUser)return true;openModal('modal-auth');return false;}
-function updateHeaderUI(){const logged=!!currentUser;$('btn-register').style.display=logged?'none':'';$('btn-login').style.display=logged?'none':'';$('btn-logout').style.display=logged?'':'none';$('btn-admin').style.display=(logged&&currentUser.isMaster)?'':'none';$('btn-account').style.display=(logged&&!currentUser.isMaster)?'':'none';$('cal-uname').textContent=logged?(currentUser.isMaster?'👑 '+currentUser.name:currentUser.name):'';$('fab-myshift').style.display=logged?'':'none';}
+function updateHeaderUI(){const logged=!!currentUser;$('btn-register').style.display=logged?'none':'';$('btn-login').style.display=logged?'none':'';$('btn-logout').style.display=logged?'':'none';$('btn-admin').style.display=(logged&&currentUser.isMaster)?'':'none';$('btn-account').style.display=(logged&&!currentUser.isMaster)?'':'none';$('btn-messages').style.display=(logged&&!currentUser.isMaster)?'':'none';$('cal-uname').textContent=logged?(currentUser.isMaster?'👑 '+currentUser.name:currentUser.name):'';$('fab-myshift').style.display=logged?'':'none';updateMsgBadge();}
 
 /* ===== 订阅 ===== */
 function subscribeMonth(){if(unsubMonth)unsubMonth();unsubMonth=DB.watch(monthPath(),val=>{monthData=val||{};renderCalendar();refreshOpenViews();});}
@@ -719,26 +750,73 @@ function renderDetail(){
   if(!detailCtx)return;const{day,slotId}=detailCtx;const s=slots[slotId]||{};
   $('detail-title').textContent=`${viewMonth}月${day}日　${s.order?banLabel(s):''}`;
   const slot=getSlotData(day,slotId)||{};const body=$('detail-body');body.innerHTML='';const isMaster=currentUser&&currentUser.isMaster;
+  if(isMaster){const bar=document.createElement('div');bar.style.cssText='display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;';
+    const dayLocked=isDayLocked(day);
+    const b1=document.createElement('button');b1.className='btn small ghost';b1.textContent=dayLocked?'📌 解除这天全部固定':'📌 固定这一整天';
+    b1.onclick=async()=>{if(!confirm(dayLocked?`解除 ${viewMonth}/${day} 全部固定？`:`固定 ${viewMonth}/${day} 整天（全部班次·全部格）？`))return;await lockDay(day,!dayLocked);logEvent(currentRoomId,{action:'edit',target:`${viewMonth}/${day} 整天${dayLocked?'解锁':'固定'}`});renderDetail();renderCalendar();};bar.appendChild(b1);
+    const b2=document.createElement('button');b2.className='btn small ghost';b2.textContent='📅 按期间固定';b2.onclick=()=>openLockRange();bar.appendChild(b2);
+    body.appendChild(bar);}
   ROLES.forEach(r=>{const cell=slot[r.key]||null;const holder=cell&&cell.id?cell:null;const locked=cell&&cell.locked;
     const sec=document.createElement('div');sec.className='detail-sec';
     const rr=document.createElement('div');rr.className='name-row';
     let nm;if(holder)nm=esc(holder.name)+(holder.byAdmin?'<span class="byadmin-tag">管理者代登</span>':'')+(locked?'<span class="lock-tag">🔒固定</span>':'');else nm='<span class="none">未登记</span>'+(locked?'<span class="lock-tag">🔒固定</span>':'');
     rr.innerHTML=`<span class="nm"><b>${r.label}</b>　${nm}</span>`;
     if(isMaster){const ops=document.createElement('div');ops.style.cssText='display:flex;gap:5px;flex-shrink:0;align-items:center;';
-      if(holder){const del=document.createElement('button');del.className='btn small danger';del.textContent='删除';del.onclick=()=>masterDeleteShift(day,slotId,r.key,holder);ops.appendChild(del);}
+      if(holder){const del=document.createElement('button');del.className='btn small danger';del.textContent='删除';del.onclick=()=>openDelReason(day,slotId,r.key,holder);ops.appendChild(del);}
       else{const asg=document.createElement('button');asg.className='btn small';asg.textContent='代登';asg.onclick=()=>openAssignModal(day,slotId,r.key);ops.appendChild(asg);}
       const lk=document.createElement('button');lk.className='btn small ghost';lk.textContent=locked?'🔓解锁':'🔒固定';lk.onclick=()=>toggleLock(day,slotId,r.key);ops.appendChild(lk);
       rr.appendChild(ops);}
     sec.appendChild(rr);body.appendChild(sec);});
   if(slot.memo){const m=document.createElement('div');m.className='detail-sec';m.innerHTML=`<h4 style="font-size:13px;color:var(--text-dim);margin-bottom:6px;">备注</h4><div class="detail-memo">${esc(slot.memo)}</div>`;body.appendChild(m);}
 }
-async function masterDeleteShift(day,slotId,roleKey,holder){
+function isDayLocked(day){for(const[slotId]of slotList()){const slot=getSlotData(day,slotId)||{};for(const r of ROLES){const c=slot[r.key];if(!(c&&c.locked))return false;}}return true;}
+async function lockDay(day,lock){
+  for(const[slotId]of slotList()){for(const r of ROLES){const path=`${monthPath()}/${day}/${slotId}/${r.key}`;const cell=(getSlotData(day,slotId)||{})[r.key]||null;
+    if(lock){const base=cell&&cell.id?cell:{};if(!(cell&&cell.locked))await DB.set(path,Object.assign({},base,{locked:true}));}
+    else{if(cell&&cell.locked){if(cell.id){const c=Object.assign({},cell);delete c.locked;await DB.set(path,c);}else await DB.remove(path);}}}}
+}
+function openLockRange(){$('lr-month').textContent=`${viewYear}年${viewMonth}月`;$('lr-from').value='';$('lr-to').value='';openModal('modal-lockrange');}
+async function doLockRange(lock){
+  const f=parseInt($('lr-from').value,10),t=parseInt($('lr-to').value,10);
+  if(!f||!t||f<1||t<1||f>t){showBanner('请输入正确的日期范围（开始 ≤ 结束）');return;}
+  if(!confirm(`${viewMonth}月 ${f}日〜${t}日 全部${lock?'固定':'解锁'}？`))return;
+  for(let d=f;d<=t;d++)await lockDay(d,lock);
+  logEvent(currentRoomId,{action:'edit',target:`${viewMonth}/${f}-${t} 期间${lock?'固定':'解锁'}`});
+  closeModal('modal-lockrange');renderCalendar();if(detailCtx)renderDetail();
+}
+let delCtx=null;
+function openDelReason(day,slotId,roleKey,holder){delCtx={day,slotId,roleKey,holder};const s=slots[slotId]||{};const roleLbl=(ROLES.find(r=>r.key===roleKey)||{}).label||roleKey;$('delr-title').textContent=`删除：${viewMonth}/${day} ${banName(s)} ${roleLbl}（${esc(holder.name)}）`;$('delr-reason').value='';openModal('modal-delreason');}
+async function confirmDelete(){
+  if(!delCtx)return;const{day,slotId,roleKey,holder}=delCtx;const reason=$('delr-reason').value.trim();
   const s=slots[slotId]||{};const roleLbl=(ROLES.find(r=>r.key===roleKey)||{}).label||roleKey;
   await DB.remove(`${monthPath()}/${day}/${slotId}/${roleKey}`);
-  if(holder.id!==MASTER_ID)await DB.set(`notifications/${holder.id}`,{flag:true,at:Date.now()});
-  logEvent(currentRoomId,{action:'delete',target:`${viewMonth}/${day} ${banName(s)} ${roleLbl}`,before:holder.name,after:'',targetUser:holder.id});
-  renderDetail();
+  if(holder.id!==MASTER_ID)await sendMessage({toType:'users',toUsers:{[holder.id]:true},kind:'delete',title:'你的班次被删除',body:`${viewMonth}/${day} ${banName(s)} ${roleLbl} 已被管理员删除。`+(reason?`\n删除理由：${reason}`:'')});
+  logEvent(currentRoomId,{action:'delete',target:`${viewMonth}/${day} ${banName(s)} ${roleLbl}`,before:holder.name,after:reason?`理由:${reason}`:'',targetUser:holder.id});
+  closeModal('modal-delreason');delCtx=null;renderDetail();
 }
+/* ===== 消息通知（メッセージボックス） ===== */
+let messages={}, unsubMessages=null;
+function subscribeMessages(){if(unsubMessages)unsubMessages();unsubMessages=DB.watch(`rooms/${currentRoomId}/messages`,val=>{messages=val||{};updateMsgBadge();if($('sheet-messages').classList.contains('open'))renderMessages();});}
+function unsubscribeMessages(){if(unsubMessages)unsubMessages();unsubMessages=null;messages={};updateMsgBadge();}
+function curUid(){return currentUser&&(currentUser.uid||currentUser.id);}
+function myMessages(){const uid=curUid();if(!uid)return[];return entriesOf(messages).filter(([id,m])=>m&&(m.toType==='all'||(m.toType==='users'&&m.toUsers&&m.toUsers[uid]))).map(([id,m])=>Object.assign({id},m)).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));}
+function unreadCount(){const uid=curUid();if(!uid)return 0;return myMessages().filter(m=>!(m.reads&&m.reads[uid])).length;}
+function updateMsgBadge(){const b=$('msg-badge');if(!b)return;if(!currentUser||currentUser.isMaster){b.style.display='none';return;}const n=unreadCount();if(n>0){b.textContent=n;b.style.display='';}else b.style.display='none';}
+function msgTime(ts){if(!ts)return'';const d=new Date(ts);return `${d.getMonth()+1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;}
+function openMessages(){if(!requireAuth())return;renderMessages();openSheet('sheet-messages');}
+function renderMessages(){
+  const body=$('messages-body');body.innerHTML='';const list=myMessages();const uid=curUid();
+  if(!list.length){body.innerHTML='<p class="muted" style="text-align:center;padding:30px 0;color:var(--text-dim);">暂无消息</p>';return;}
+  list.forEach(m=>{const read=m.reads&&m.reads[uid];const card=document.createElement('div');card.className='msg-card'+(read?'':' unread');
+    const kindTag=m.kind==='delete'?'<span class="msg-kind del">班次删除</span>':m.kind==='change'?'<span class="msg-kind chg">班次变更</span>':'';
+    card.innerHTML=`<div class="msg-top"><b>${esc(m.title||'通知')}</b>${kindTag}</div><div class="msg-body">${esc(m.body||'')}</div><div class="msg-meta">${esc(m.from||'管理员')}・${msgTime(m.createdAt)}</div>`;
+    const foot=document.createElement('div');foot.className='msg-foot';
+    if(read)foot.innerHTML=`<span class="msg-done">✓ 已确认 ${msgTime(read)}</span>`;
+    else{const btn=document.createElement('button');btn.className='btn small';btn.textContent='我已确认';btn.onclick=()=>confirmRead(m.id);foot.appendChild(btn);}
+    card.appendChild(foot);body.appendChild(card);});
+}
+async function confirmRead(msgId){const uid=curUid();if(!uid)return;await DB.set(`rooms/${currentRoomId}/messages/${msgId}/reads/${uid}`,Date.now());renderMessages();updateMsgBadge();}
+async function sendMessage(opt){const id='m_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);await DB.set(`rooms/${currentRoomId}/messages/${id}`,{from:opt.from||'管理员',toType:opt.toType||'all',toUsers:opt.toUsers||null,kind:opt.kind||'notice',title:opt.title||'',body:opt.body||'',createdAt:Date.now(),reads:{}});return id;}
 async function toggleLock(day,slotId,roleKey){
   const path=`${monthPath()}/${day}/${slotId}/${roleKey}`;const cell=(getSlotData(day,slotId)||{})[roleKey]||null;
   const s=slots[slotId]||{};const roleLbl=(ROLES.find(r=>r.key===roleKey)||{}).label||roleKey;
