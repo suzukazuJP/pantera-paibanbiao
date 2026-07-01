@@ -268,13 +268,15 @@ async function loadLate(){
     let sl=await DB.get(`rooms/${rid}/slots`);sl=sl||{};
     entriesOf(md).forEach(([dayStr,dd])=>{const day=parseInt(dayStr,10);if(!day||!dd)return;
       Object.entries(dd).forEach(([slotId,slot])=>{if(slotId==='memo'||!slot)return;const s=sl[slotId]||{order:0,time:slotId};
-        ROLES.forEach(r=>{const h=slot[r.key];if(h&&h.id&&h.checkIn){const startTs=shiftStartTs(lateYear,lateMonth,day,s.time);const min=Math.max(0,Math.round((h.checkIn-startTs)/60000));const late=h.checkIn>startTs;
-          rows.push({room:(rooms[rid]||{}).name||rid,day,order:s.order||0,start:(String(s.time||'').match(/(\d{1,2}):(\d{2})/)||[])[0]||(s.time||''),slot:`${s.order||''}班 ${s.time||''}`,role:r.label,name:h.name,checkIn:h.checkIn,late,min});}});});});
+        ROLES.forEach(r=>{const h=slot[r.key];if(h&&h.id){const hasChk=!!(h.checkIn&&h.checkInBy);const startTs=shiftStartTs(lateYear,lateMonth,day,s.time);const min=hasChk?Math.max(0,Math.round((h.checkIn-startTs)/60000)):0;const late=hasChk?h.checkIn>startTs:false;
+          rows.push({rid,room:(rooms[rid]||{}).name||rid,day,order:s.order||0,start:(String(s.time||'').match(/(\d{1,2}):(\d{2})/)||[])[0]||(s.time||''),slot:`${s.order||''}班 ${s.time||''}`,slotId,role:r.label,roleKey:r.key,name:h.name,uid:h.id,checkIn:hasChk?h.checkIn:null,checkInBy:hasChk?h.checkInBy:null,late,min});}});});});
   }
   lateRows=rows;renderLate();
 }
 function lateHHMM(ts){const d=new Date(ts);return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');}
 function lateDT(ts){const d=new Date(ts);return (d.getMonth()+1)+'/'+d.getDate()+' '+pad2(d.getHours())+':'+pad2(d.getMinutes());}
+async function setAttendTime(rid,day,slotId,roleKey){const inp=document.getElementById(`att-${rid}-${day}-${slotId}-${roleKey}`);const v=(inp&&inp.value||'').trim();const m=v.match(/^(\d{1,2}):(\d{2})$/);if(!m){alert('请输入正确的时间（HH:MM，例 20:15）');return;}const ts=new Date(lateYear,lateMonth-1,day,parseInt(m[1],10),parseInt(m[2],10)).getTime();const base=`rooms/${rid}/shifts/${lateYear}/${lateMonth}/${day}/${slotId}/${roleKey}`;await DB.set(`${base}/checkIn`,ts);await DB.set(`${base}/checkInBy`,'manual');loadLate();}
+async function clearAttend(rid,day,slotId,roleKey){if(!confirm('清除这条打卡记录？'))return;const base=`rooms/${rid}/shifts/${lateYear}/${lateMonth}/${day}/${slotId}/${roleKey}`;await DB.remove(`${base}/checkIn`);await DB.remove(`${base}/checkInBy`);loadLate();}
 /* 操作日志/实时日志（同一数据）の手動全消去 */
 async function clearLogs(){
   const ids=scopeRoomIds();if(!ids.length){alert('没有可清空的直播间');return;}
@@ -294,7 +296,7 @@ async function purgeOldLogs(){
 function renderLate(){
   const kw=($('late-search').value||'').trim().toLowerCase();
   let list=lateRows.filter(r=>!kw||(r.name||'').toLowerCase().includes(kw));
-  const sum={};list.forEach(r=>{const k=r.name;if(!sum[k])sum[k]={name:r.name,lateCount:0,lateMin:0,total:0,lates:[]};sum[k].total++;if(r.late){sum[k].lateCount++;sum[k].lateMin+=r.min;sum[k].lates.push(`${lateMonth}/${r.day} ${r.order}班(${r.start}起) 迟到${r.min}分`);}});
+  const sum={};list.forEach(r=>{const k=r.name;if(!sum[k])sum[k]={name:r.name,lateCount:0,lateMin:0,total:0,lates:[]};if(r.checkInBy){sum[k].total++;if(r.late){sum[k].lateCount++;sum[k].lateMin+=r.min;sum[k].lates.push(`${lateMonth}/${r.day} ${r.order}班(${r.start}起) 迟到${r.min}分`);}}});
   const sums=Object.values(sum).sort((a,b)=>b.lateMin-a.lateMin||b.lateCount-a.lateCount);
   const showRoom=scope==='all';
   let h='';
@@ -305,9 +307,13 @@ function renderLate(){
   h+=`</tbody></table>`;
   h+=`<h4 style="color:var(--accent);font-size:13px;margin:18px 0 8px;">打卡明细</h4>`;
   list.sort((a,b)=>a.day-b.day||a.order-b.order);
-  h+=`<table><thead><tr>${showRoom?'<th>直播间</th>':''}<th>日期</th><th>班次</th><th>角色</th><th>姓名</th><th>打卡</th><th>迟到</th></tr></thead><tbody>`;
-  if(!list.length)h+=`<tr><td colspan="7" class="muted">无</td></tr>`;
-  list.forEach(r=>{h+=`<tr>${showRoom?`<td>${esc(r.room)}</td>`:''}<td>${lateMonth}/${r.day}</td><td>${esc(r.slot)}</td><td>${esc(r.role)}</td><td>${esc(r.name)}</td><td class="mono">${lateDT(r.checkIn)}</td><td style="color:${r.late?'#e08a8a':'#7fd1b9'}">${r.late?'迟到'+r.min+'分':'准时'}</td></tr>`;});
+  h+=`<table><thead><tr>${showRoom?'<th>直播间</th>':''}<th>日期</th><th>班次</th><th>角色</th><th>姓名</th><th>到岗</th><th>迟到</th><th>手动调整</th></tr></thead><tbody>`;
+  if(!list.length)h+=`<tr><td colspan="${showRoom?9:8}" class="muted">无</td></tr>`;
+  list.forEach(r=>{const tid=`att-${r.rid}-${r.day}-${r.slotId}-${r.roleKey}`;const tv=r.checkIn?lateHHMM(r.checkIn):'';
+    h+=`<tr>${showRoom?`<td>${esc(r.room)}</td>`:''}<td>${lateMonth}/${r.day}</td><td>${esc(r.slot)}</td><td>${esc(r.role)}</td><td>${esc(r.name)}</td>`+
+    `<td class="mono">${r.checkInBy?lateDT(r.checkIn)+(r.checkInBy==='manual'?' <span style="color:#caa64a;font-size:11px;">(手动)</span>':''):'<span class="muted">未打卡</span>'}</td>`+
+    `<td style="color:${r.checkInBy?(r.late?'#e08a8a':'#7fd1b9'):'#666'}">${r.checkInBy?(r.late?'迟到'+r.min+'分':'准时'):'—'}</td>`+
+    `<td style="white-space:nowrap;"><input class="att-in" id="${tid}" placeholder="HH:MM" value="${tv}" style="width:64px;margin-right:4px;"><button class="btn-s b-blue" onclick="setAttendTime('${r.rid}',${r.day},'${r.slotId}','${r.roleKey}')">确定</button>${r.checkInBy?` <button class="btn-s b-gray" onclick="clearAttend('${r.rid}',${r.day},'${r.slotId}','${r.roleKey}')">清除</button>`:''}</td></tr>`;});
   h+=`</tbody></table>`;
   $('late-scroll').innerHTML=h;
 }
