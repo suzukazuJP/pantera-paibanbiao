@@ -242,7 +242,7 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
       </div>
       <div class="scroll" id="livedata-scroll">
         <div class="ld-form">
-          <div class="ld-drop" id="ld-drop" onclick="$('ld-file').click()">📷 点击选择「直播数据大屏」截图上传，自动识别其中的数据（识别后可核对/修改再保存）</div>
+          <div class="ld-drop" id="ld-drop" onclick="$('ld-file').click()">📷 点击选择「直播数据大屏」截图上传，或直接 Cmd+V / Ctrl+V 粘贴截图，自动识别其中的数据（识别后可核对/修改再保存）</div>
           <input type="file" id="ld-file" accept="image/*" style="display:none;" onchange="ldHandleFile(this.files[0])">
           <div class="ld-status" id="ld-status"></div>
           <div class="ld-grid" id="ld-grid"></div>
@@ -348,6 +348,17 @@ function switchTab(t){
   else if(t==='rooms')renderRooms();
   else if(t==='messages')loadMessages();
 }
+document.addEventListener('paste',e=>{
+  if(!$('panel-livedata')||!$('panel-livedata').classList.contains('show'))return;
+  const items=(e.clipboardData&&e.clipboardData.items)||[];
+  for(const item of items){
+    if(item.type&&item.type.startsWith('image/')){
+      const file=item.getAsFile();
+      if(file){e.preventDefault();ldHandleFile(file);}
+      break;
+    }
+  }
+});
 
 /* ===== 迟到统计 ===== */
 function timeToMinutes(t){if(!t||typeof t!=='string')return 99999;const m=t.match(/(\d{1,2}):(\d{2})/);if(!m)return 99999;return parseInt(m[1],10)*60+parseInt(m[2],10);}
@@ -814,7 +825,8 @@ let ldEditKey=null; /* {rid,y,m,d,key} when editing an existing session, else nu
 function initLiveData(){
   const sel=$('ld-room');
   sel.innerHTML=Object.entries(rooms).map(([id,r])=>`<option value="${esc(id)}">${esc(r.name)}</option>`).join('');
-  sel.value=(scope!=='all'&&rooms[scope])?scope:Object.keys(rooms)[0]||'';
+  const lastRoom=localStorage.getItem('ld_last_room');
+  sel.value=(scope!=='all'&&rooms[scope])?scope:(lastRoom&&rooms[lastRoom])?lastRoom:Object.keys(rooms)[0]||'';
   const now=new Date();
   if(!$('ld-date').value)$('ld-date').value=`${now.getFullYear()}-${pad2(now.getMonth()+1)}-${pad2(now.getDate())}`;
   if(!$('ld-time').value)$('ld-time').value=`${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
@@ -833,11 +845,28 @@ function resetLdForm(){
   renderLdGrid({},{});
   $('ld-status').textContent='';$('ld-status').className='ld-status';
 }
+function downscaleImageFile(file,maxDim){
+  return new Promise((resolve,reject)=>{
+    const img=new Image();const url=URL.createObjectURL(file);
+    img.onload=()=>{
+      URL.revokeObjectURL(url);
+      let w=img.naturalWidth,h=img.naturalHeight;
+      if(Math.max(w,h)>maxDim){const s=maxDim/Math.max(w,h);w=Math.round(w*s);h=Math.round(h*s);}
+      const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
+      canvas.getContext('2d').drawImage(img,0,0,w,h);
+      canvas.toBlob(b=>b?resolve(b):reject(new Error('压缩图片失败')),'image/png');
+    };
+    img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error('图片加载失败'));};
+    img.src=url;
+  });
+}
 async function ldHandleFile(file){
   if(!file)return;
-  const st=$('ld-status');st.className='ld-status busy';st.textContent='识别中…（首次使用需下载识别引擎，可能需要几十秒）';
+  const st=$('ld-status');st.className='ld-status busy';st.textContent='正在压缩图片…';
   try{
-    const {data}=await Tesseract.recognize(file,'chi_sim+eng');
+    const small=await downscaleImageFile(file,1600);
+    st.textContent='识别中…（首次使用需下载识别引擎，可能需要几十秒）';
+    const {data}=await Tesseract.recognize(small,'chi_sim+eng');
     const parsed=parseLiveStatsText(data.text);
     const hits={};Object.keys(parsed).forEach(k=>hits[k]=true);
     renderLdGrid(parsed,hits);
@@ -866,6 +895,7 @@ async function saveLdSession(){
   if(!key)key='k'+Date.now()+Math.random().toString(36).slice(2,6);
   await DB.set(`rooms/${rid}/liveStats/${y}/${m}/${d}/${key}`,rec);
   await logEvent(rid,{action:'edit',target:`直播数据 ${y}/${m}/${d} ${timeStr}`,after:`GMV=${rec.gmv!=null?rec.gmv:'-'}`});
+  localStorage.setItem('ld_last_room',rid);
   resetLdForm();loadLdSessions();
   alert('已保存');
 }
