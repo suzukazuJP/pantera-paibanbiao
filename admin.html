@@ -780,7 +780,7 @@ const LIVE_FIELDS=[
 function normLabel(s){return String(s||'').replace(/[\s:：()（）\[\]]/g,'');}
 function parseNumUnit(s){
   if(!s)return null;
-  const m=String(s).match(/([\d]{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s*(K|k|万|%|s|S)?/);
+  const m=String(s).match(/([\d]{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s*(K|k|万|%)?/);
   if(!m)return null;
   let num=parseFloat(m[1].replace(/,/g,''));
   if(isNaN(num))return null;
@@ -789,9 +789,26 @@ function parseNumUnit(s){
   else if(unit==='万')num*=10000;
   return num;
 }
+/* 大屏OCR的实际输出规律：一行里会把同一行的多个"标签"连在一起，紧跟着下一行把对应的多个"数值"用空格连在一起
+   （而不是"标签→数值"逐项交替）。所以按"行对"来解析：先在一行里贪婪匹配出这行包含哪几个已知标签（按长度从长到短，
+   避免"点击率"抢到"点击率（通过直播预览）"的位置），再把下一行按空白切开，按顺序一一对应赋值。 */
+function tokenizeLabels(line,candidates){
+  const norm=normLabel(line);
+  let pos=0;const found=[];
+  while(pos<norm.length){
+    let matched=null;
+    for(const f of candidates){
+      const nl=normLabel(f.label);
+      if(nl&&norm.startsWith(nl,pos)){matched=f;break;}
+    }
+    if(matched){found.push(matched);pos+=normLabel(matched.label).length;}
+    else pos++;
+  }
+  return found;
+}
 function parseLiveStatsText(rawText){
-  const lines=String(rawText||'').split('\n').map(l=>l.trim()).filter(Boolean);
-  const consumed=new Set();
+  const raw=String(rawText||'');
+  const lines=raw.split('\n').map(l=>l.trim()).filter(Boolean);
   const result={};
   const gmvIdx=lines.findIndex(l=>/GMV/i.test(l));
   if(gmvIdx>=0){
@@ -799,29 +816,26 @@ function parseLiveStatsText(rawText){
     if(v==null)v=parseNumUnit(lines[gmvIdx+1]);
     if(v==null)v=parseNumUnit(lines[gmvIdx+2]);
     if(v!=null)result.gmv=v;
-    consumed.add(gmvIdx);
   }
-  const candidates=[...LIVE_FIELDS].filter(f=>f.key!=='gmv').sort((a,b)=>b.label.length-a.label.length);
-  for(let i=0;i<lines.length;i++){
-    if(consumed.has(i))continue;
-    const nl=normLabel(lines[i]);
-    for(const f of candidates){
-      if(result[f.key]!=null)continue;
-      const nlabel=normLabel(f.label);
-      if(!nl.includes(nlabel))continue;
-      let rest=lines[i].replace(f.label,'').trim();
-      let v=parseNumUnit(rest);
-      if(v==null){
-        for(let j=i+1;j<=i+2&&j<lines.length;j++){
-          if(consumed.has(j))continue;
-          v=parseNumUnit(lines[j]);
-          if(v!=null){consumed.add(j);break;}
-        }
-      }
-      if(v!=null)result[f.key]=v;
-      consumed.add(i);
-      break;
+  /* 顶部两个胶囊（归因成交件数/浏览人数）经常和图标文字挤在同一行，用关键词就近查找数字，不按行对解析 */
+  /* OCR有时会在每个汉字之间插入空格（如"归 因 成 交 件 数"），先去空格再匹配这两个胶囊标签，避免匹配不到 */
+  const rawNoSpace=raw.replace(/\s+/g,'');
+  {const m=rawNoSpace.match(/成交件数[^\d]{0,1}(\d+(?:\.\d+)?)/);if(m)result.orders=parseFloat(m[1]);}
+  {const m=rawNoSpace.match(/浏览人数[^\d]{0,1}(\d+(?:\.\d+)?)(K|k|万)?/);if(m){let v=parseFloat(m[1]);if(m[2]==='K'||m[2]==='k')v*=1000;else if(m[2]==='万')v*=10000;result.viewersNow=v;}}
+
+  const candidates=[...LIVE_FIELDS].filter(f=>f.key!=='gmv'&&f.key!=='orders'&&f.key!=='viewersNow').sort((a,b)=>b.label.length-a.label.length);
+  const usedLine=new Set();
+  for(let i=0;i<lines.length-1;i++){
+    if(usedLine.has(i)||i===gmvIdx)continue;
+    const labelsFound=tokenizeLabels(lines[i],candidates).filter(f=>result[f.key]==null);
+    if(!labelsFound.length)continue;
+    const tokens=lines[i+1].split(/\s+/).filter(Boolean);
+    let ok=0;
+    for(let k=0;k<labelsFound.length&&k<tokens.length;k++){
+      const v=parseNumUnit(tokens[k]);
+      if(v!=null){result[labelsFound[k].key]=v;ok++;}
     }
+    if(ok){usedLine.add(i);usedLine.add(i+1);}
   }
   return result;
 }
@@ -849,6 +863,21 @@ function resetLdForm(){
   renderLdGrid({},{});
   $('ld-status').textContent='';$('ld-status').className='ld-status';
 }
+function enhanceForOcr(ctx,w,h){
+  const imgData=ctx.getImageData(0,0,w,h);const d=imgData.data;
+  const gray=new Float32Array(w*h);
+  let min=255,max=0;
+  for(let i=0,p=0;i<d.length;i+=4,p++){
+    const g=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+    gray[p]=g;if(g<min)min=g;if(g>max)max=g;
+  }
+  const range=Math.max(1,max-min);
+  for(let i=0,p=0;i<d.length;i+=4,p++){
+    const v=Math.max(0,Math.min(255,Math.round((gray[p]-min)/range*255)));
+    d[i]=d[i+1]=d[i+2]=v;
+  }
+  ctx.putImageData(imgData,0,0);
+}
 function downscaleImageFile(file,maxDim){
   return new Promise((resolve,reject)=>{
     const img=new Image();const url=URL.createObjectURL(file);
@@ -857,7 +886,8 @@ function downscaleImageFile(file,maxDim){
       let w=img.naturalWidth,h=img.naturalHeight;
       if(Math.max(w,h)>maxDim){const s=maxDim/Math.max(w,h);w=Math.round(w*s);h=Math.round(h*s);}
       const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
-      canvas.getContext('2d').drawImage(img,0,0,w,h);
+      const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0,w,h);
+      enhanceForOcr(ctx,w,h);
       canvas.toBlob(b=>b?resolve(b):reject(new Error('压缩图片失败')),'image/png');
     };
     img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error('图片加载失败'));};
