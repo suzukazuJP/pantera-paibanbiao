@@ -6,6 +6,7 @@
 <title>Pantera 管理控制台</title>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 :root{--bg:#0e1014;--panel:#171a21;--panel2:#1d212b;--line:#2a3039;--ink:#e6e8ec;--dim:#8a93a3;--accent:#7fd1b9;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
@@ -96,6 +97,49 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
 .msg-item-read{font-size:12px;color:var(--dim);line-height:1.6;}
 .msg-kind-a{font-size:10px;font-weight:700;border-radius:4px;padding:1px 6px;color:#fff;}
 .msg-kind-a.del{background:#b0413a;}.msg-kind-a.chg{background:#caa64a;color:#1a1a1a;}
+/* dashboard */
+.kpi-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;}
+.kpi-card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px;min-width:130px;flex:1;}
+.kpi-card .num{font-size:22px;font-weight:700;color:var(--accent);line-height:1.3;}
+.kpi-card.warn .num{color:#e08a8a;}
+.kpi-card .lbl{font-size:11px;color:var(--dim);margin-top:2px;}
+.dash-h{font-size:13px;color:var(--accent);margin:20px 0 10px;font-weight:600;}
+.dash-h:first-child{margin-top:0;}
+.room-block{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;}
+.room-block .rb-name{font-size:13px;font-weight:600;margin-bottom:8px;}
+.chip-row{display:flex;gap:6px;flex-wrap:wrap;}
+.chip{border-radius:8px;padding:6px 10px;font-size:11px;color:#1a1a1a;font-weight:600;min-width:120px;}
+.chip .ct{font-size:11px;}
+.chip .cn{font-weight:400;font-size:10px;margin-top:2px;opacity:.75;}
+.chip.empty{background:var(--panel2)!important;color:var(--dim);}
+.fill-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:12px;}
+.fill-row .fl{width:56px;color:var(--dim);flex-shrink:0;}
+.fill-track{flex:1;height:8px;background:var(--panel2);border-radius:4px;overflow:hidden;}
+.fill-bar{height:100%;background:var(--accent);}
+.fill-pct{width:48px;text-align:right;color:var(--dim);font-family:var(--mono);font-size:11px;flex-shrink:0;}
+.chart-wrap{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:10px;}
+.chart-wrap canvas{width:100%;height:140px;display:block;}
+.rank-row{display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid var(--line);font-size:12px;}
+.rank-row .rk{width:18px;color:var(--dim);}
+.rank-row .rn{flex:1;}
+.rank-row .rc{color:#e08a8a;font-family:var(--mono);}
+/* live stats (直播数据) */
+.ld-form{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px;}
+.ld-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;margin-top:10px;}
+.ld-field label{display:block;font-size:11px;color:var(--dim);margin-bottom:3px;}
+.ld-field input{width:100%;}
+.ld-field.ocr-hit input{border-color:var(--accent);}
+.ld-status{font-size:12px;color:var(--dim);margin:6px 0;}
+.ld-status.busy{color:var(--accent);}
+.ld-status.err{color:#e08a8a;}
+.ld-drop{border:1px dashed var(--line);border-radius:8px;padding:16px;text-align:center;color:var(--dim);font-size:12px;cursor:pointer;}
+.ld-drop:hover{border-color:var(--accent);color:var(--accent);}
+.ld-sess{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:8px;font-size:12px;}
+.ld-sess-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;cursor:pointer;}
+.ld-sess-top b{color:var(--accent);}
+.ld-sess-detail{display:none;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px;font-size:11px;color:var(--dim);}
+.ld-sess.open .ld-sess-detail{display:grid;}
+.ld-sess-detail span b{color:var(--ink);}
 </style>
 </head>
 <body>
@@ -116,17 +160,29 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
     <button onclick="adminLogout()">退出</button>
   </header>
   <div class="tabs">
-    <button class="tab active" data-tab="logs" onclick="switchTab('logs')">操作日志</button>
+    <button class="tab active" data-tab="dash" onclick="switchTab('dash')">仪表盘</button>
+    <button class="tab" data-tab="logs" onclick="switchTab('logs')">操作日志</button>
     <button class="tab" data-tab="rt" onclick="switchTab('rt')">实时日志</button>
     <button class="tab" data-tab="overview" onclick="switchTab('overview')">班表总览</button>
     <button class="tab" data-tab="users" onclick="switchTab('users')">员工</button>
     <button class="tab" data-tab="late" onclick="switchTab('late')">迟到统计</button>
+    <button class="tab" data-tab="livedata" onclick="switchTab('livedata')">直播数据</button>
     <button class="tab" data-tab="rooms" onclick="switchTab('rooms')">直播间管理</button>
     <button class="tab" data-tab="messages" onclick="switchTab('messages')">消息</button>
   </div>
   <main>
+    <!-- dashboard -->
+    <div class="panel show" id="panel-dash">
+      <div class="toolbar">
+        <button class="btn-s b-gray" onclick="dashNav(-1)">‹ 上月</button>
+        <b id="dash-label" style="min-width:90px;text-align:center;"></b>
+        <button class="btn-s b-gray" onclick="dashNav(1)">下月 ›</button>
+        <button class="btn-s b-gray" onclick="loadDashboard()">刷新</button>
+      </div>
+      <div class="scroll" id="dash-scroll"><p class="muted">加载中…</p></div>
+    </div>
     <!-- logs -->
-    <div class="panel show" id="panel-logs">
+    <div class="panel" id="panel-logs">
       <div class="toolbar">
         <input id="log-search" placeholder="关键词搜索…" oninput="renderLogs()" style="flex:1;min-width:140px;">
         <select id="log-action" onchange="renderLogs()"><option value="">全部操作</option></select>
@@ -168,6 +224,30 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
         <button class="btn-s b-gray" onclick="loadLate()">刷新</button>
       </div>
       <div class="scroll" id="late-scroll"></div>
+    </div>
+    <!-- live data -->
+    <div class="panel" id="panel-livedata">
+      <div class="toolbar">
+        <select id="ld-room" onchange="loadLdSessions()"></select>
+        <input type="date" id="ld-date" onchange="loadLdSessions()">
+        <input type="time" id="ld-time">
+        <button class="btn-s b-gray" onclick="loadLdSessions()">刷新列表</button>
+      </div>
+      <div class="scroll" id="livedata-scroll">
+        <div class="ld-form">
+          <div class="ld-drop" id="ld-drop" onclick="$('ld-file').click()">📷 点击选择「直播数据大屏」截图上传，自动识别其中的数据（识别后可核对/修改再保存）</div>
+          <input type="file" id="ld-file" accept="image/*" style="display:none;" onchange="ldHandleFile(this.files[0])">
+          <div class="ld-status" id="ld-status"></div>
+          <div class="ld-grid" id="ld-grid"></div>
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <button class="btn-s b-blue" onclick="saveLdSession()">💾 保存本场数据</button>
+            <button class="btn-s b-gray" onclick="resetLdForm()">清空重来</button>
+            <span class="muted" id="ld-edit-tag"></span>
+          </div>
+        </div>
+        <h4 style="color:var(--accent);font-size:13px;margin:14px 0 8px;">已保存的场次</h4>
+        <div id="ld-sess-list"></div>
+      </div>
     </div>
     <!-- rooms -->
     <div class="panel" id="panel-rooms"><div class="scroll" id="rooms-scroll"></div></div>
@@ -221,6 +301,9 @@ let logsCache=[];
 let ovYear=2026,ovMonth=6,ovData=[];
 let usersCache=[];
 let logSort={key:'ts',dir:1};
+let dashYear=2026,dashMonth=6;
+const STATUS_HEX={green:'#a8e6c1',yellow:'#f9e4a0',red:'#f5a8a8',blue:'#a9c9f5',gray:'#cfcfcf'};
+const STATUS_LABEL_D={green:'已齐',blue:'需协调',yellow:'缺一方',red:'无人',gray:'已锁定'};
 
 /* ===== 登录 ===== */
 function adminLogin(){const id=$('m-id').value.trim(),pw=$('m-pw').value;if(id===MASTER_ID&&pw===MASTER_PW){sessionStorage.setItem('pantera_admin','1');startApp();}else $('m-err').textContent='ID或密码错误';}
@@ -237,6 +320,7 @@ async function loadRooms(){
 async function startApp(){
   $('login').style.display='none';$('app').classList.add('show');
   const now=new Date();ovYear=Math.max(now.getFullYear(),2026);ovMonth=now.getFullYear()>=2026?now.getMonth()+1:6;
+  dashYear=ovYear;dashMonth=ovMonth;
   await loadRooms();purgeOldLogs();onScopeChange();
 }
 function onScopeChange(){scope=$('room-select').value;$('scope-label').textContent=scope==='all'?'（全部直播间）':'（'+(rooms[scope]?rooms[scope].name:scope)+'）';
@@ -246,11 +330,13 @@ function switchTab(t){
   document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x.dataset.tab===t));
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('show'));$('panel-'+t).classList.add('show');
   stopRealtime();
-  if(t==='logs')loadLogs();
+  if(t==='dash')loadDashboard();
+  else if(t==='logs')loadLogs();
   else if(t==='rt')startRealtime();
   else if(t==='overview')loadOverview();
   else if(t==='users')loadUsers();
   else if(t==='late')loadLate();
+  else if(t==='livedata')initLiveData();
   else if(t==='rooms')renderRooms();
   else if(t==='messages')loadMessages();
 }
@@ -316,6 +402,354 @@ function renderLate(){
     `<td style="white-space:nowrap;"><input class="att-in" id="${tid}" placeholder="HH:MM" value="${tv}" style="width:64px;margin-right:4px;"><button class="btn-s b-blue" onclick="setAttendTime('${r.rid}',${r.day},'${r.slotId}','${r.roleKey}')">确定</button>${r.checkInBy?` <button class="btn-s b-gray" onclick="clearAttend('${r.rid}',${r.day},'${r.slotId}','${r.roleKey}')">清除</button>`:''}</td></tr>`;});
   h+=`</tbody></table>`;
   $('late-scroll').innerHTML=h;
+}
+
+/* ===== 仪表盘 ===== */
+function dashNav(d){let y=dashYear,m=dashMonth+d;if(m<1){m=12;y--;}if(m>12){m=1;y++;}if(y<2026)return;dashYear=y;dashMonth=m;loadDashboard();}
+function computeSlotStatus(slot){
+  if(!slot)return 'red';
+  if(slot._status&&STATUS_HEX[slot._status])return slot._status;
+  const has=k=>(slot[k]&&slot[k].id)?1:0;
+  const G=has('A')+has('B'),H=has('C'),I=has('E')+has('F');
+  const groups=(G>0?1:0)+(H>0?1:0)+(I>0?1:0);
+  if(groups===0){const hasLock=ROLES.some(r=>slot[r.key]&&slot[r.key].locked);return hasLock?'gray':'red';}
+  if(groups===1)return'yellow';
+  if(G===1&&H===1)return'green';
+  return'blue';
+}
+function slotNames(slot){if(!slot)return[];return ROLES.map(r=>slot[r.key]).filter(h=>h&&h.id).map(h=>h.name);}
+function monthLateCounts(y,m,sl,md){
+  let total=0,late=0;
+  if(!md)return{total,late};
+  entriesOf(md).forEach(([dayStr,dd])=>{const day=parseInt(dayStr,10);if(!day||!dd)return;
+    Object.entries(dd).forEach(([slotId,slot])=>{if(slotId==='memo'||!slot)return;const s=sl[slotId]||{order:0,time:slotId};
+      ROLES.forEach(r=>{const h=slot[r.key];if(h&&h.id&&h.checkIn&&h.checkInBy){total++;const startTs=shiftStartTs(y,m,day,s.time);if(h.checkIn>startTs)late++;}});});});
+  return{total,late};
+}
+let dashLoadSeq=0;
+async function loadDashboard(){
+  const mySeq=++dashLoadSeq;
+  $('dash-label').textContent=`${dashYear}年${dashMonth}月`;$('dash-scroll').innerHTML='<p class="muted">加载中…</p>';
+  const roomIds=scopeRoomIds();
+  const today=new Date();
+  const isCurMonth=today.getFullYear()===dashYear&&(today.getMonth()+1)===dashMonth;
+  const u=await DB.get('users');usersCache=entriesOf(u).map(([,x])=>x);
+  const newUsers=usersCache.filter(x=>{if(!x.createdAt)return false;const d=new Date(x.createdAt);return d.getFullYear()===dashYear&&(d.getMonth()+1)===dashMonth;}).length;
+
+  const roomStats=[];
+  const slotsByRoom={};
+  let totFilled=0,totSlots=0,totStatus={green:0,yellow:0,red:0,blue:0,gray:0};
+  for(const rid of roomIds){
+    let sl=await DB.get(`rooms/${rid}/slots`);sl=sl||{};slotsByRoom[rid]=sl;
+    const slIds=Object.keys(sl);
+    const md=await DB.get(`rooms/${rid}/shifts/${dashYear}/${dashMonth}`);
+    const daysInMonth=new Date(dashYear,dashMonth,0).getDate();
+    let filled=0,total=0;const statusCounts={green:0,yellow:0,red:0,blue:0,gray:0};
+    const byRole={};ROLES.forEach(r=>byRole[r.key]={total:0,filled:0});
+    const todaySlots=[];
+    for(let day=1;day<=daysInMonth;day++){
+      const dd=md&&md[day];
+      slIds.forEach(slotId=>{
+        const s=sl[slotId]||{};const slot=dd&&dd[slotId];
+        ROLES.forEach(r=>{byRole[r.key].total++;const h=slot&&slot[r.key];if(h&&h.id){filled++;byRole[r.key].filled++;}});
+        total+=ROLES.length;
+        const status=computeSlotStatus(slot);statusCounts[status]++;
+        if(isCurMonth&&day===today.getDate())todaySlots.push({slotId,order:s.order||0,time:s.time||'',status,names:slotNames(slot)});
+      });
+    }
+    todaySlots.sort((a,b)=>a.order-b.order);
+    roomStats.push({id:rid,name:(rooms[rid]||{}).name||rid,filled,total,statusCounts,byRole,todaySlots});
+    totFilled+=filled;totSlots+=total;Object.keys(totStatus).forEach(k=>totStatus[k]+=statusCounts[k]);
+  }
+
+  /* 迟到趋势：往前推6个月（含当月） */
+  const trendMonths=[];for(let i=5;i>=0;i--){let y=dashYear,m=dashMonth-i;while(m<1){m+=12;y--;}trendMonths.push({y,m});}
+  const trend=[];
+  for(const{y,m}of trendMonths){
+    let total=0,late=0;
+    for(const rid of roomIds){const md=await DB.get(`rooms/${rid}/shifts/${y}/${m}`);const c=monthLateCounts(y,m,slotsByRoom[rid],md);total+=c.total;late+=c.late;}
+    trend.push({y,m,total,late});
+  }
+  /* 本月迟到排行 */
+  const lateSum={};
+  for(const rid of roomIds){
+    const md=await DB.get(`rooms/${rid}/shifts/${dashYear}/${dashMonth}`);if(!md)continue;
+    const sl=slotsByRoom[rid];
+    entriesOf(md).forEach(([dayStr,dd])=>{const day=parseInt(dayStr,10);if(!day||!dd)return;
+      Object.entries(dd).forEach(([slotId,slot])=>{if(slotId==='memo'||!slot)return;const s=sl[slotId]||{order:0,time:slotId};
+        ROLES.forEach(r=>{const h=slot[r.key];if(h&&h.id&&h.checkIn&&h.checkInBy){const startTs=shiftStartTs(dashYear,dashMonth,day,s.time);
+          if(h.checkIn>startTs){const k=h.name;lateSum[k]=(lateSum[k]||0)+1;}}});});});
+  }
+  const lateRank=Object.entries(lateSum).map(([name,c])=>({name,c})).sort((a,b)=>b.c-a.c).slice(0,5);
+
+  /* 直播数据（本月GMV等，来自截图OCR录入） */
+  const daysInMonth2=new Date(dashYear,dashMonth,0).getDate();
+  const gmvByDay=Array.from({length:daysInMonth2},()=>0);
+  let liveTotals={gmv:0,orders:0,newFollowers:0,sessions:0};
+  let liveToday={gmv:0,orders:0,newFollowers:0,sessions:0};
+  for(const rid of roomIds){
+    const md=await DB.get(`rooms/${rid}/liveStats/${dashYear}/${dashMonth}`);if(!md)continue;
+    entriesOf(md).forEach(([dayStr,dd])=>{const day=parseInt(dayStr,10);if(!day||!dd)return;
+      entriesOf(dd).forEach(([,rec])=>{if(!rec)return;
+        const g=rec.gmv||0;gmvByDay[day-1]+=g;
+        liveTotals.gmv+=g;liveTotals.orders+=rec.orders||0;liveTotals.newFollowers+=rec.newFollowers||0;liveTotals.sessions++;
+        if(isCurMonth&&day===today.getDate()){liveToday.gmv+=g;liveToday.orders+=rec.orders||0;liveToday.newFollowers+=rec.newFollowers||0;liveToday.sessions++;}
+      });});
+  }
+
+  if(mySeq!==dashLoadSeq)return;
+  renderDashboard({roomStats,totFilled,totSlots,totStatus,newUsers,trend,lateRank,roomCount:roomIds.length,userCount:usersCache.length,isCurMonth,gmvByDay,liveTotals,liveToday});
+}
+function renderDashboard(d){
+  const pct=(f,t)=>t?Math.round(f/t*100):0;
+  let h='';
+  h+=`<div class="kpi-row">
+    <div class="kpi-card"><div class="num">${d.roomCount}</div><div class="lbl">直播间数</div></div>
+    <div class="kpi-card"><div class="num">${d.userCount}</div><div class="lbl">在籍员工</div></div>
+    <div class="kpi-card"><div class="num">${d.newUsers}</div><div class="lbl">本月新增员工</div></div>
+    <div class="kpi-card"><div class="num">${pct(d.totFilled,d.totSlots)}%</div><div class="lbl">本月排班充足率</div></div>
+    <div class="kpi-card${d.totStatus.red?' warn':''}"><div class="num">${d.totStatus.red}</div><div class="lbl">本月缺人班次</div></div>
+  </div>`;
+
+  h+=`<div class="dash-h">直播数据（「直播数据」标签页录入）</div>`;
+  h+=`<div class="kpi-row">
+    <div class="kpi-card"><div class="num">${d.liveTotals.gmv.toLocaleString()}</div><div class="lbl">本月GMV合计（円）</div></div>
+    <div class="kpi-card"><div class="num">${d.liveTotals.orders}</div><div class="lbl">本月成交件数合计</div></div>
+    <div class="kpi-card"><div class="num">${d.liveTotals.newFollowers}</div><div class="lbl">本月新增粉丝合计</div></div>
+    <div class="kpi-card"><div class="num">${d.liveTotals.sessions}</div><div class="lbl">本月已录入场次</div></div>
+    ${d.isCurMonth?`<div class="kpi-card"><div class="num">${d.liveToday.gmv.toLocaleString()}</div><div class="lbl">今日GMV（${d.liveToday.sessions}场）</div></div>`:''}
+  </div>
+  <div class="chart-wrap"><canvas id="dash-gmv-canvas"></canvas></div>`;
+
+  h+=`<div class="dash-h">今日出勤状况${d.isCurMonth?'':'（当前查看月份非本月，仅显示排班月份内数据）'}</div>`;
+  if(!d.isCurMonth){
+    h+=`<p class="muted">切换到本月才能查看「今日」状况。</p>`;
+  }else if(!d.roomStats.length){
+    h+=`<p class="muted">没有可显示的直播间。</p>`;
+  }else{
+    d.roomStats.forEach(rs=>{
+      h+=`<div class="room-block"><div class="rb-name">${esc(rs.name)}</div><div class="chip-row">`;
+      if(!rs.todaySlots.length)h+=`<span class="muted">今日无班次</span>`;
+      rs.todaySlots.forEach(s=>{
+        const names=s.names.length?s.names.join('/'):'无人登记';
+        h+=`<div class="chip" style="background:${STATUS_HEX[s.status]}"><div class="ct">${s.order}班 ${esc(s.time)} · ${STATUS_LABEL_D[s.status]}</div><div class="cn">${esc(names)}</div></div>`;
+      });
+      h+=`</div></div>`;
+    });
+  }
+
+  h+=`<div class="dash-h">本月排班充足率（按角色）</div>`;
+  if(!d.roomStats.length)h+=`<p class="muted">没有可显示的直播间。</p>`;
+  d.roomStats.forEach(rs=>{
+    h+=`<div class="room-block"><div class="rb-name">${esc(rs.name)} <span class="muted" style="font-weight:400;">（总体 ${pct(rs.filled,rs.total)}%）</span></div>`;
+    ROLES.forEach(r=>{const b=rs.byRole[r.key];const p=pct(b.filled,b.total);
+      h+=`<div class="fill-row"><span class="fl">${esc(r.label)}</span><div class="fill-track"><div class="fill-bar" style="width:${p}%"></div></div><span class="fill-pct">${b.filled}/${b.total}</span></div>`;});
+    h+=`</div>`;
+  });
+
+  h+=`<div class="dash-h">迟到趋势（近6个月）</div>`;
+  h+=`<div class="chart-wrap"><canvas id="dash-trend-canvas"></canvas></div>`;
+
+  h+=`<div class="dash-h">本月迟到排行 Top5</div>`;
+  if(!d.lateRank.length)h+=`<p class="muted">本月暂无迟到记录。</p>`;
+  else{h+=`<div class="room-block">`;d.lateRank.forEach((r,i)=>{h+=`<div class="rank-row"><span class="rk">${i+1}</span><span class="rn">${esc(r.name)}</span><span class="rc">迟到${r.c}次</span></div>`;});h+=`</div>`;}
+
+  $('dash-scroll').innerHTML=h;
+  const cv=$('dash-trend-canvas');
+  if(cv)drawBarChart(cv,d.trend.map(t=>`${t.m}月`),d.trend.map(t=>t.late),{color:'#e08a8a'});
+  const gcv=$('dash-gmv-canvas');
+  if(gcv){const step=d.gmvByDay.length>15?5:1;const labels=d.gmvByDay.map((_,i)=>((i+1)%step===0||i===0)?String(i+1):'');drawBarChart(gcv,labels,d.gmvByDay.map(v=>Math.round(v)),{color:'#caa64a'});}
+}
+function drawBarChart(canvas,labels,values,opts){
+  opts=opts||{};
+  const dpr=window.devicePixelRatio||1;
+  const W=canvas.clientWidth||300,H=canvas.clientHeight||140;
+  canvas.width=W*dpr;canvas.height=H*dpr;
+  const ctx=canvas.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,W,H);
+  const pad={l:20,r:8,t:16,b:20};
+  const max=Math.max(1,...values);
+  const bw=(W-pad.l-pad.r)/Math.max(1,values.length);
+  ctx.strokeStyle='#2a3039';ctx.beginPath();ctx.moveTo(pad.l,H-pad.b);ctx.lineTo(W-pad.r,H-pad.b);ctx.stroke();
+  ctx.textAlign='center';
+  values.forEach((v,i)=>{
+    const bh=(H-pad.t-pad.b)*(v/max);
+    const x=pad.l+i*bw+bw*0.22,w=bw*0.56;
+    const y=H-pad.b-bh;
+    ctx.fillStyle=opts.color||'#7fd1b9';
+    ctx.fillRect(x,y,w,Math.max(0,bh));
+    ctx.fillStyle='#e6e8ec';ctx.font='10px sans-serif';ctx.fillText(String(v),x+w/2,y-4>pad.t?y-4:pad.t+10);
+    ctx.fillStyle='#8a93a3';ctx.fillText(labels[i],x+w/2,H-pad.b+13);
+  });
+}
+
+/* ===== 直播数据（截图OCR识别） ===== */
+const LIVE_FIELDS=[
+  {key:'gmv',label:'归因GMV',unit:'円'},
+  {key:'orders',label:'归因成交件数',unit:'件'},
+  {key:'viewersNow',label:'当前观看人数',unit:'人'},
+  {key:'exposure',label:'曝光次数',unit:''},
+  {key:'views',label:'观看次数',unit:''},
+  {key:'ctrPreview',label:'点击率（通过直播预览）',unit:'%'},
+  {key:'ctr',label:'点击率',unit:'%'},
+  {key:'productClicks',label:'商品点击量',unit:''},
+  {key:'liveCtr',label:'直播点击率',unit:'%'},
+  {key:'skuCvr',label:'点击成交转化率（SKU订单）',unit:'%'},
+  {key:'skuOrderRate',label:'下单率（SKU订单）',unit:'%'},
+  {key:'payRate',label:'付款率',unit:'%'},
+  {key:'productExposure',label:'商品曝光次数',unit:''},
+  {key:'gmvPer1kExposure',label:'千次曝光成交金额',unit:'円'},
+  {key:'gmvPer1kViews',label:'千次观看成交金额',unit:'円'},
+  {key:'avgWatchSec',label:'人均观看时长',unit:'秒'},
+  {key:'likes',label:'点赞数',unit:''},
+  {key:'newFollowers',label:'新增粉丝数',unit:''},
+];
+function normLabel(s){return String(s||'').replace(/[\s:：()（）\[\]]/g,'');}
+function parseNumUnit(s){
+  if(!s)return null;
+  const m=String(s).match(/([\d]{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s*(K|k|万|%|s|S)?/);
+  if(!m)return null;
+  let num=parseFloat(m[1].replace(/,/g,''));
+  if(isNaN(num))return null;
+  const unit=m[2];
+  if(unit==='K'||unit==='k')num*=1000;
+  else if(unit==='万')num*=10000;
+  return num;
+}
+function parseLiveStatsText(rawText){
+  const lines=String(rawText||'').split('\n').map(l=>l.trim()).filter(Boolean);
+  const consumed=new Set();
+  const result={};
+  const gmvIdx=lines.findIndex(l=>/GMV/i.test(l));
+  if(gmvIdx>=0){
+    let v=parseNumUnit(lines[gmvIdx]);
+    if(v==null)v=parseNumUnit(lines[gmvIdx+1]);
+    if(v==null)v=parseNumUnit(lines[gmvIdx+2]);
+    if(v!=null)result.gmv=v;
+    consumed.add(gmvIdx);
+  }
+  const candidates=[...LIVE_FIELDS].filter(f=>f.key!=='gmv').sort((a,b)=>b.label.length-a.label.length);
+  for(let i=0;i<lines.length;i++){
+    if(consumed.has(i))continue;
+    const nl=normLabel(lines[i]);
+    for(const f of candidates){
+      if(result[f.key]!=null)continue;
+      const nlabel=normLabel(f.label);
+      if(!nl.includes(nlabel))continue;
+      let rest=lines[i].replace(f.label,'').trim();
+      let v=parseNumUnit(rest);
+      if(v==null){
+        for(let j=i+1;j<=i+2&&j<lines.length;j++){
+          if(consumed.has(j))continue;
+          v=parseNumUnit(lines[j]);
+          if(v!=null){consumed.add(j);break;}
+        }
+      }
+      if(v!=null)result[f.key]=v;
+      consumed.add(i);
+      break;
+    }
+  }
+  return result;
+}
+let ldEditKey=null; /* {rid,y,m,d,key} when editing an existing session, else null */
+function initLiveData(){
+  const sel=$('ld-room');
+  sel.innerHTML=Object.entries(rooms).map(([id,r])=>`<option value="${esc(id)}">${esc(r.name)}</option>`).join('');
+  sel.value=(scope!=='all'&&rooms[scope])?scope:Object.keys(rooms)[0]||'';
+  const now=new Date();
+  if(!$('ld-date').value)$('ld-date').value=`${now.getFullYear()}-${pad2(now.getMonth()+1)}-${pad2(now.getDate())}`;
+  if(!$('ld-time').value)$('ld-time').value=`${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+  resetLdForm();
+  loadLdSessions();
+}
+function renderLdGrid(values,hits){
+  values=values||{};hits=hits||{};
+  $('ld-grid').innerHTML=LIVE_FIELDS.map(f=>{
+    const v=values[f.key];
+    return `<div class="ld-field${hits[f.key]?' ocr-hit':''}"><label>${esc(f.label)}${f.unit?`（${f.unit}）`:''}</label><input type="number" step="any" id="ldf-${f.key}" value="${v==null?'':v}"></div>`;
+  }).join('');
+}
+function resetLdForm(){
+  ldEditKey=null;$('ld-edit-tag').textContent='';
+  renderLdGrid({},{});
+  $('ld-status').textContent='';$('ld-status').className='ld-status';
+}
+async function ldHandleFile(file){
+  if(!file)return;
+  const st=$('ld-status');st.className='ld-status busy';st.textContent='识别中…（首次使用需下载识别引擎，可能需要几十秒）';
+  try{
+    const {data}=await Tesseract.recognize(file,'chi_sim+eng');
+    const parsed=parseLiveStatsText(data.text);
+    const hits={};Object.keys(parsed).forEach(k=>hits[k]=true);
+    renderLdGrid(parsed,hits);
+    const n=Object.keys(parsed).length;
+    st.className='ld-status';st.textContent=n?`已自动识别 ${n}/${LIVE_FIELDS.length} 项，请核对后保存（未识别到的项请手动填写）。`:'未能自动识别出数据，请手动填写。';
+  }catch(e){
+    st.className='ld-status err';st.textContent='识别失败：'+(e&&e.message||e);
+  }
+}
+function collectLdForm(){
+  const v={};
+  LIVE_FIELDS.forEach(f=>{const el=$('ldf-'+f.key);const n=el&&el.value!==''?parseFloat(el.value):null;if(n!=null&&!isNaN(n))v[f.key]=n;});
+  return v;
+}
+async function saveLdSession(){
+  const rid=$('ld-room').value;if(!rid){alert('请先在「直播间管理」添加直播间');return;}
+  const dateStr=$('ld-date').value,timeStr=$('ld-time').value||'00:00';
+  if(!dateStr){alert('请选择日期');return;}
+  const [y,m,d]=dateStr.split('-').map(x=>parseInt(x,10));
+  const [hh,mm]=timeStr.split(':').map(x=>parseInt(x,10));
+  const ts=new Date(y,m-1,d,hh||0,mm||0).getTime();
+  const values=collectLdForm();
+  if(!Object.keys(values).length){alert('请至少填写一项数据');return;}
+  const rec=Object.assign({ts,source:'ocr'},values);
+  let key=ldEditKey&&ldEditKey.key;
+  if(!key)key='k'+Date.now()+Math.random().toString(36).slice(2,6);
+  await DB.set(`rooms/${rid}/liveStats/${y}/${m}/${d}/${key}`,rec);
+  await logEvent(rid,{action:'edit',target:`直播数据 ${y}/${m}/${d} ${timeStr}`,after:`GMV=${rec.gmv!=null?rec.gmv:'-'}`});
+  resetLdForm();loadLdSessions();
+  alert('已保存');
+}
+async function loadLdSessions(){
+  const rid=$('ld-room').value;const box=$('ld-sess-list');if(!rid){box.innerHTML='';return;}
+  box.innerHTML='<p class="muted">加载中…</p>';
+  const dateStr=$('ld-date').value||'';const [y,m]=dateStr?dateStr.split('-').map(x=>parseInt(x,10)):[new Date().getFullYear(),new Date().getMonth()+1];
+  const md=await DB.get(`rooms/${rid}/liveStats/${y}/${m}`);
+  const rows=[];
+  entriesOf(md).forEach(([dayStr,dd])=>{entriesOf(dd).forEach(([key,rec])=>{if(rec)rows.push(Object.assign({rid,y,m,day:parseInt(dayStr,10),key},rec));});});
+  rows.sort((a,b)=>(b.ts||0)-(a.ts||0));
+  if(!rows.length){box.innerHTML=`<p class="muted">${y}年${m}月暂无已保存的场次。</p>`;return;}
+  box.innerHTML=rows.map(r=>{
+    const dt=r.ts?new Date(r.ts):null;
+    const dtStr=dt?`${dt.getMonth()+1}/${dt.getDate()} ${pad2(dt.getHours())}:${pad2(dt.getMinutes())}`:`${r.m}/${r.day}`;
+    const detail=LIVE_FIELDS.map(f=>r[f.key]!=null?`<span><b>${esc(f.label)}</b>：${r[f.key]}${f.unit}</span>`:'').filter(Boolean).join('');
+    return `<div class="ld-sess" id="ld-sess-${r.key}">
+      <div class="ld-sess-top" onclick="document.getElementById('ld-sess-${r.key}').classList.toggle('open')">
+        <span>${dtStr}</span><b>GMV ${r.gmv!=null?r.gmv:'-'}円</b><span class="muted">成交${r.orders!=null?r.orders:'-'}件 · 观看${r.viewersNow!=null?r.viewersNow:'-'}人 · 新增粉丝${r.newFollowers!=null?r.newFollowers:'-'}</span>
+        <span class="sp" style="flex:1"></span>
+        <button class="btn-s b-gray" onclick="event.stopPropagation();editLdSession('${esc(r.rid)}',${r.y},${r.m},${r.day},'${esc(r.key)}')">编辑</button>
+        <button class="btn-s b-red" onclick="event.stopPropagation();deleteLdSession('${esc(r.rid)}',${r.y},${r.m},${r.day},'${esc(r.key)}')">删除</button>
+      </div>
+      <div class="ld-sess-detail">${detail}</div>
+    </div>`;
+  }).join('');
+}
+async function editLdSession(rid,y,m,day,key){
+  const rec=await DB.get(`rooms/${rid}/liveStats/${y}/${m}/${day}/${key}`);if(!rec)return;
+  $('ld-room').value=rid;
+  $('ld-date').value=`${y}-${pad2(m)}-${pad2(day)}`;
+  if(rec.ts){const dt=new Date(rec.ts);$('ld-time').value=`${pad2(dt.getHours())}:${pad2(dt.getMinutes())}`;}
+  ldEditKey={rid,y,m,d:day,key};
+  $('ld-edit-tag').textContent=`正在编辑 ${y}/${m}/${day} 的场次记录`;
+  renderLdGrid(rec,{});
+  window.scrollTo?window.scrollTo(0,0):null;$('livedata-scroll').scrollTop=0;
+}
+async function deleteLdSession(rid,y,m,day,key){
+  if(!confirm('删除这条直播数据记录？'))return;
+  await DB.remove(`rooms/${rid}/liveStats/${y}/${m}/${day}/${key}`);
+  if(ldEditKey&&ldEditKey.rid===rid&&ldEditKey.key===key)resetLdForm();
+  loadLdSessions();
 }
 
 /* ===== Tab1: 操作日志 ===== */
