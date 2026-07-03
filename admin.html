@@ -245,6 +245,10 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
           <div class="ld-drop" id="ld-drop" onclick="$('ld-file').click()">📷 点击选择「直播数据大屏」截图上传，或直接 Cmd+V / Ctrl+V 粘贴截图，自动识别其中的数据（识别后可核对/修改再保存）</div>
           <input type="file" id="ld-file" accept="image/*" style="display:none;" onchange="ldHandleFile(this.files[0])">
           <div class="ld-status" id="ld-status"></div>
+          <div id="ld-raw-wrap" style="display:none;margin-bottom:8px;">
+            <button class="btn-s b-gray" onclick="var t=$('ld-raw-text');t.style.display=t.style.display==='none'?'block':'none';">查看/隐藏 识别原始文字（调试用）</button>
+            <textarea id="ld-raw-text" readonly style="display:none;width:100%;height:160px;margin-top:6px;font-family:var(--mono);font-size:11px;background:#0b0d11;border:1px solid var(--line);color:var(--dim);border-radius:6px;padding:8px;"></textarea>
+          </div>
           <div class="ld-grid" id="ld-grid"></div>
           <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
             <button class="btn-s b-blue" onclick="saveLdSession()">💾 保存本场数据</button>
@@ -756,7 +760,7 @@ async function generateDashboardVideo(){
 const LIVE_FIELDS=[
   {key:'gmv',label:'归因GMV',unit:'円'},
   {key:'orders',label:'归因成交件数',unit:'件'},
-  {key:'viewersNow',label:'当前观看人数',unit:'人'},
+  {key:'viewersNow',label:'浏览人数',unit:'人'},
   {key:'exposure',label:'曝光次数',unit:''},
   {key:'views',label:'观看次数',unit:''},
   {key:'ctrPreview',label:'点击率（通过直播预览）',unit:'%'},
@@ -867,6 +871,7 @@ async function ldHandleFile(file){
     const small=await downscaleImageFile(file,1600);
     st.textContent='识别中…（首次使用需下载识别引擎，可能需要几十秒）';
     const {data}=await Tesseract.recognize(small,'chi_sim+eng');
+    $('ld-raw-wrap').style.display='block';$('ld-raw-text').value=data.text||'';
     const parsed=parseLiveStatsText(data.text);
     const hits={};Object.keys(parsed).forEach(k=>hits[k]=true);
     renderLdGrid(parsed,hits);
