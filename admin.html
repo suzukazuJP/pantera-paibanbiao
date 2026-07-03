@@ -7,6 +7,8 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 :root{--bg:#0e1014;--panel:#171a21;--panel2:#1d212b;--line:#2a3039;--ink:#e6e8ec;--dim:#8a93a3;--accent:#7fd1b9;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
@@ -140,6 +142,11 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
 .ld-sess-detail{display:none;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px;font-size:11px;color:var(--dim);}
 .ld-sess.open .ld-sess-detail{display:grid;}
 .ld-sess-detail span b{color:var(--ink);}
+/* video generation */
+.video-progress{height:6px;background:var(--panel2);border-radius:3px;overflow:hidden;margin:8px 0;display:none;}
+.video-progress.show{display:block;}
+.video-progress-bar{height:100%;width:0%;background:var(--accent);transition:width .15s linear;}
+#video-preview{width:240px;max-width:100%;background:#000;}
 </style>
 </head>
 <body>
@@ -302,6 +309,7 @@ let ovYear=2026,ovMonth=6,ovData=[];
 let usersCache=[];
 let logSort={key:'ts',dir:1};
 let dashYear=2026,dashMonth=6;
+let lastDashData=null;
 const STATUS_HEX={green:'#a8e6c1',yellow:'#f9e4a0',red:'#f5a8a8',blue:'#a9c9f5',gray:'#cfcfcf'};
 const STATUS_LABEL_D={green:'已齐',blue:'需协调',yellow:'缺一方',red:'无人',gray:'已锁定'};
 
@@ -554,7 +562,18 @@ function renderDashboard(d){
   if(!d.lateRank.length)h+=`<p class="muted">本月暂无迟到记录。</p>`;
   else{h+=`<div class="room-block">`;d.lateRank.forEach((r,i)=>{h+=`<div class="rank-row"><span class="rk">${i+1}</span><span class="rn">${esc(r.name)}</span><span class="rc">迟到${r.c}次</span></div>`;});h+=`</div>`;}
 
+  h+=`<div class="dash-h">动画生成</div>
+  <div class="room-block">
+    <p class="muted" style="margin-bottom:8px;">生成一段约15秒的竖屏(9:16) mp4动画，汇总本月GMV/出勤数据。完全在浏览器本地生成，首次使用需下载识别引擎（约25MB），生成过程可能需要几十秒到几分钟。</p>
+    <button class="btn-s b-blue" id="video-gen-btn" onclick="generateDashboardVideo()">🎬 生成本月动画（mp4）</button>
+    <div class="video-progress" id="video-progress"><div class="video-progress-bar" id="video-progress-bar"></div></div>
+    <div class="ld-status" id="video-status"></div>
+    <video id="video-preview" controls style="display:none;margin-top:10px;border-radius:8px;"></video>
+    <div style="margin-top:8px;"><a id="video-download" style="display:none;" class="btn-s b-gray" download="pantera_report.mp4">下载 mp4</a></div>
+  </div>`;
+
   $('dash-scroll').innerHTML=h;
+  lastDashData=d;
   const cv=$('dash-trend-canvas');
   if(cv)drawBarChart(cv,d.trend.map(t=>`${t.m}月`),d.trend.map(t=>t.late),{color:'#e08a8a'});
   const gcv=$('dash-gmv-canvas');
@@ -581,6 +600,145 @@ function drawBarChart(canvas,labels,values,opts){
     ctx.fillStyle='#e6e8ec';ctx.font='10px sans-serif';ctx.fillText(String(v),x+w/2,y-4>pad.t?y-4:pad.t+10);
     ctx.fillStyle='#8a93a3';ctx.fillText(labels[i],x+w/2,H-pad.b+13);
   });
+}
+
+/* ===== 动画生成（Canvas逐帧描画 + ffmpeg.wasm本地编码，无需服务器） ===== */
+const VIDEO_W=1080,VIDEO_H=1920,VIDEO_FPS=30,VIDEO_DUR=15;
+const VIDEO_COLORS={bg:'#0e1014',ink:'#e6e8ec',dim:'#8a93a3',accent:'#7fd1b9',gold:'#caa64a'};
+function easeOutCubic(x){return 1-Math.pow(1-x,3);}
+function clamp(x,a,b){return Math.max(a,Math.min(b,x));}
+function fadeAlpha(local,dur,fi,fo){fi=fi==null?0.4:fi;fo=fo==null?0.4:fo;if(local<fi)return clamp(local/fi,0,1);if(local>dur-fo)return clamp((dur-local)/fo,0,1);return 1;}
+const VIDEO_SCENES=[
+  {name:'intro',start:0,end:2.5},
+  {name:'kpi',start:2.5,end:6},
+  {name:'gmv',start:6,end:10},
+  {name:'status',start:10,end:13},
+  {name:'outro',start:13,end:VIDEO_DUR},
+];
+function renderVideoFrame(ctx,t,data){
+  ctx.fillStyle=VIDEO_COLORS.bg;ctx.fillRect(0,0,VIDEO_W,VIDEO_H);
+  const sc=VIDEO_SCENES.find(s=>t>=s.start&&t<s.end)||VIDEO_SCENES[VIDEO_SCENES.length-1];
+  const local=t-sc.start,dur=sc.end-sc.start;
+  if(sc.name==='intro')videoSceneIntro(ctx,local,dur,data);
+  else if(sc.name==='kpi')videoSceneKpi(ctx,local,dur,data);
+  else if(sc.name==='gmv')videoSceneGmv(ctx,local,dur,data);
+  else if(sc.name==='status')videoSceneStatus(ctx,local,dur,data);
+  else videoSceneOutro(ctx,local,dur,data);
+}
+function videoSceneIntro(ctx,local,dur,data){
+  const a=fadeAlpha(local,dur,0.5,0.5);
+  ctx.save();ctx.globalAlpha=a;ctx.textAlign='center';
+  ctx.fillStyle=VIDEO_COLORS.accent;ctx.font='700 90px sans-serif';ctx.fillText('PANTERA',VIDEO_W/2,VIDEO_H/2-40);
+  ctx.fillStyle=VIDEO_COLORS.ink;ctx.font='36px sans-serif';
+  const roomLabel=data.roomStats.length===1?data.roomStats[0].name:'全部直播间';
+  ctx.fillText(roomLabel,VIDEO_W/2,VIDEO_H/2+40);
+  ctx.fillStyle=VIDEO_COLORS.dim;ctx.font='28px sans-serif';ctx.fillText(`${dashYear}年${dashMonth}月 数据报告`,VIDEO_W/2,VIDEO_H/2+90);
+  ctx.restore();
+}
+function videoSceneKpi(ctx,local,dur,data){
+  const a=fadeAlpha(local,dur,0.4,0.4);
+  const p=easeOutCubic(clamp(local/1.2,0,1));
+  ctx.save();ctx.globalAlpha=a;ctx.textAlign='center';
+  ctx.fillStyle=VIDEO_COLORS.dim;ctx.font='32px sans-serif';ctx.fillText('本月概览',VIDEO_W/2,320);
+  const pct=data.totSlots?Math.round(data.totFilled/data.totSlots*100):0;
+  const gmv=Math.round((data.liveTotals.gmv||0)*p);
+  const orders=Math.round((data.liveTotals.orders||0)*p);
+  const fillPct=Math.round(pct*p);
+  const rows=[[gmv.toLocaleString(),'本月GMV合计（円）'],[String(orders),'本月成交件数'],[fillPct+'%','排班充足率']];
+  let y=560;
+  rows.forEach(([num,lbl])=>{
+    ctx.fillStyle=VIDEO_COLORS.gold;ctx.font='700 96px sans-serif';ctx.fillText(num,VIDEO_W/2,y);
+    ctx.fillStyle=VIDEO_COLORS.dim;ctx.font='28px sans-serif';ctx.fillText(lbl,VIDEO_W/2,y+50);
+    y+=280;
+  });
+  ctx.restore();
+}
+function videoSceneGmv(ctx,local,dur,data){
+  const a=fadeAlpha(local,dur,0.4,0.4);
+  const reveal=clamp(local/(dur-0.6),0,1);
+  ctx.save();ctx.globalAlpha=a;ctx.textAlign='center';
+  ctx.fillStyle=VIDEO_COLORS.dim;ctx.font='32px sans-serif';ctx.fillText('GMV 日推移',VIDEO_W/2,320);
+  const days=data.gmvByDay||[];
+  const visibleCount=Math.max(1,Math.round(days.length*reveal));
+  const pad={l:80,r:80,t:420,b:1500};
+  const max=Math.max(1,...days);
+  const bw=(VIDEO_W-pad.l-pad.r)/Math.max(1,days.length);
+  for(let i=0;i<visibleCount;i++){
+    const v=days[i]||0;
+    const bh=(pad.b-pad.t)*(v/max);
+    const x=pad.l+i*bw+bw*0.15,w=bw*0.7;
+    const y=pad.b-bh;
+    ctx.fillStyle=VIDEO_COLORS.gold;ctx.fillRect(x,y,w,Math.max(2,bh));
+  }
+  ctx.strokeStyle='#2a3039';ctx.beginPath();ctx.moveTo(pad.l,pad.b);ctx.lineTo(VIDEO_W-pad.r,pad.b);ctx.stroke();
+  ctx.restore();
+}
+function videoSceneStatus(ctx,local,dur,data){
+  const a=fadeAlpha(local,dur,0.4,0.4);
+  const p=easeOutCubic(clamp(local/1.0,0,1));
+  ctx.save();ctx.globalAlpha=a;ctx.textAlign='center';
+  ctx.fillStyle=VIDEO_COLORS.dim;ctx.font='32px sans-serif';ctx.fillText('本月排班状态分布',VIDEO_W/2,420);
+  const order=[['green','已齐'],['blue','需协调'],['yellow','缺一方'],['red','无人'],['gray','已锁定']];
+  const total=Object.values(data.totStatus||{}).reduce((a,b)=>a+b,0)||1;
+  let y=560;
+  order.forEach(([key,label])=>{
+    const v=(data.totStatus||{})[key]||0;
+    const w=(VIDEO_W-160)*(v/total)*p;
+    ctx.fillStyle=STATUS_HEX[key];ctx.fillRect(80,y,Math.max(0,w),56);
+    ctx.textAlign='left';ctx.fillStyle=VIDEO_COLORS.ink;ctx.font='26px sans-serif';ctx.fillText(`${label} ${v}`,80,y-14);
+    ctx.textAlign='center';
+    y+=140;
+  });
+  ctx.restore();
+}
+function videoSceneOutro(ctx,local,dur,data){
+  const a=fadeAlpha(local,dur,0.4,0.6);
+  ctx.save();ctx.globalAlpha=a;ctx.textAlign='center';
+  ctx.fillStyle=VIDEO_COLORS.accent;ctx.font='700 70px sans-serif';ctx.fillText('PANTERA',VIDEO_W/2,VIDEO_H/2-20);
+  ctx.fillStyle=VIDEO_COLORS.dim;ctx.font='30px sans-serif';ctx.fillText('本月辛苦了 🎬',VIDEO_W/2,VIDEO_H/2+50);
+  ctx.restore();
+}
+let _ffmpegInstance=null;
+async function getFfmpeg(){
+  if(_ffmpegInstance)return _ffmpegInstance;
+  const{FFmpeg}=FFmpegWASM;const{toBlobURL}=FFmpegUtil;
+  const ffBase='https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd';
+  const ff=new FFmpeg();
+  const base='https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm';
+  await ff.load({classWorkerURL:await toBlobURL(`${ffBase}/814.ffmpeg.js`,'text/javascript'),coreURL:await toBlobURL(`${base}/ffmpeg-core.js`,'text/javascript'),wasmURL:await toBlobURL(`${base}/ffmpeg-core.wasm`,'application/wasm')});
+  _ffmpegInstance=ff;return ff;
+}
+async function generateDashboardVideo(){
+  if(!lastDashData){alert('请先等待仪表盘数据加载完成');return;}
+  const data=lastDashData;
+  const btn=$('video-gen-btn'),statusEl=$('video-status'),prog=$('video-progress'),bar=$('video-progress-bar'),preview=$('video-preview'),dl=$('video-download');
+  btn.disabled=true;prog.classList.add('show');bar.style.width='0%';preview.style.display='none';dl.style.display='none';
+  statusEl.className='ld-status busy';statusEl.textContent='正在加载识别引擎…（首次使用需下载约25MB，请耐心等待）';
+  try{
+    const ff=await getFfmpeg();
+    const canvas=document.createElement('canvas');canvas.width=VIDEO_W;canvas.height=VIDEO_H;
+    const ctx=canvas.getContext('2d');
+    const totalFrames=VIDEO_FPS*VIDEO_DUR;
+    for(let i=0;i<totalFrames;i++){
+      renderVideoFrame(ctx,i/VIDEO_FPS,data);
+      const blob=await new Promise(res=>canvas.toBlob(res,'image/png'));
+      const buf=new Uint8Array(await blob.arrayBuffer());
+      await ff.writeFile(`frame${String(i).padStart(4,'0')}.png`,buf);
+      if(i%10===0||i===totalFrames-1){bar.style.width=Math.round((i+1)/totalFrames*70)+'%';statusEl.textContent=`正在生成画面… ${i+1}/${totalFrames}`;}
+    }
+    statusEl.textContent='正在编码视频…';bar.style.width='80%';
+    await ff.exec(['-framerate',String(VIDEO_FPS),'-i','frame%04d.png','-c:v','libx264','-pix_fmt','yuv420p','-y','out.mp4']);
+    bar.style.width='95%';
+    const out=await ff.readFile('out.mp4');
+    const url=URL.createObjectURL(new Blob([out],{type:'video/mp4'}));
+    preview.src=url;preview.style.display='block';dl.href=url;dl.style.display='inline-block';
+    bar.style.width='100%';statusEl.className='ld-status';statusEl.textContent='生成完成！可以预览或下载。';
+    for(let i=0;i<totalFrames;i++){try{await ff.deleteFile(`frame${String(i).padStart(4,'0')}.png`);}catch(e){}}
+  }catch(e){
+    statusEl.className='ld-status err';statusEl.textContent='生成失败：'+(e&&e.message||e);
+  }finally{
+    btn.disabled=false;
+  }
 }
 
 /* ===== 直播数据（截图OCR识别） ===== */
