@@ -780,7 +780,7 @@ const LIVE_FIELDS=[
 function normLabel(s){return String(s||'').replace(/[\s:：()（）\[\]]/g,'');}
 function parseNumUnit(s){
   if(!s)return null;
-  const m=String(s).match(/([\d]{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s*(K|k|万|%)?/);
+  const m=String(s).match(/([\d]{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)(?:(?!K|k|万|%)[a-zA-Z])?\s*(K|k|万|%)?/);
   if(!m)return null;
   let num=parseFloat(m[1].replace(/,/g,''));
   if(isNaN(num))return null;
@@ -837,6 +837,9 @@ function parseLiveStatsText(rawText){
     }
     if(ok){usedLine.add(i);usedLine.add(i+1);}
   }
+  /* 百分比数值的小数点经常被识别丢失（如"4.18%"被读成"418%"），导致数值变成100倍。
+     这类费率型指标现实中不会达到100%，所以超过100就当作丢了小数点，自动÷100修正 */
+  LIVE_FIELDS.forEach(f=>{if(f.unit==='%'&&result[f.key]!=null&&result[f.key]>=100)result[f.key]=result[f.key]/100;});
   return result;
 }
 let ldEditKey=null; /* {rid,y,m,d,key} when editing an existing session, else null */
