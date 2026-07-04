@@ -770,11 +770,9 @@ const LIVE_FIELDS=[
   {key:'skuCvr',label:'点击成交转化率（SKU订单）',unit:'%'},
   {key:'skuOrderRate',label:'下单率（SKU订单）',unit:'%'},
   {key:'payRate',label:'付款率',unit:'%'},
-  {key:'productExposure',label:'商品曝光次数',unit:''},
   {key:'gmvPer1kExposure',label:'千次曝光成交金额',unit:'円'},
   {key:'gmvPer1kViews',label:'千次观看成交金额',unit:'円'},
   {key:'avgWatchSec',label:'人均观看时长',unit:'秒'},
-  {key:'likes',label:'点赞数',unit:''},
   {key:'newFollowers',label:'新增粉丝数',unit:''},
 ];
 function normLabel(s){return String(s||'').replace(/[\s:：()（）\[\]]/g,'');}
@@ -901,7 +899,7 @@ async function ldHandleFile(file){
   if(!file)return;
   const st=$('ld-status');st.className='ld-status busy';st.textContent='正在压缩图片…';
   try{
-    const small=await downscaleImageFile(file,1600);
+    const small=await downscaleImageFile(file,2400);
     st.textContent='识别中…（首次使用需下载识别引擎，可能需要几十秒）';
     const {data}=await Tesseract.recognize(small,'chi_sim+eng');
     $('ld-raw-wrap').style.display='block';$('ld-raw-text').value=data.text||'';
