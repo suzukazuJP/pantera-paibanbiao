@@ -43,7 +43,7 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
 #banner{position:fixed;top:0;left:0;right:0;z-index:99;background:var(--ink);color:#fff;padding:12px 40px 12px 14px;font-size:14px;font-weight:500;transform:translateY(-100%);transition:transform .25s var(--ease);}
 #banner.show{transform:none;}
 #banner button{position:absolute;right:8px;top:50%;transform:translateY(-50%);border:none;background:none;font-size:18px;cursor:pointer;color:#fff;}
-#sync-status{position:fixed;bottom:6px;left:50%;transform:translateX(-50%);z-index:200;padding:3px 12px;border-radius:14px;font-size:11px;font-weight:500;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.12);display:none;}
+#sync-status{position:fixed;bottom:6px;right:10px;z-index:200;padding:3px 12px;border-radius:14px;font-size:11px;font-weight:500;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.12);display:none;opacity:1;transition:opacity .4s;}
 #sync-status.show{display:block;}
 #sync-status.online{background:#d8f3e3;color:#1a7a45;}
 #sync-status.connecting{background:#fdecc8;color:#9a6700;}
@@ -146,6 +146,8 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
 .adm-slot{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
 .adm-slot span{font-size:13px;color:var(--text-dim);width:32px;flex-shrink:0;font-weight:700;}
 .adm-slot input{flex:1;min-width:0;padding:8px 10px;border-radius:6px;border:1px solid #d5d5d5;background:#fff;color:var(--ink);font-size:14px;outline:none;}
+.adm-pattern-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+.adm-pattern-name{flex:1;min-width:0;font-size:13px;font-weight:600;word-break:break-all;}
 .adm-user{display:flex;align-items:center;gap:8px;background:var(--card);border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:13px;}
 .adm-user .ui{flex:1;min-width:0;}
 .adm-user .ui b{font-size:14px;}
@@ -347,10 +349,16 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
   <div class="sheet-body">
     <div class="adm-sec">
       <h4>班次时间设置（<span id="adm-slot-room"></span>）</h4>
+      <p class="muted" style="font-size:12px;margin-bottom:6px;">以下时间仅对 <b id="adm-slots-month"></b> 本月生效，其他月份不受影响。</p>
       <div id="adm-slots"></div>
-      <div style="display:flex;gap:8px;margin-top:6px;"><button class="btn small" onclick="saveSlots()">保存班次时间</button><button class="btn small ghost" onclick="adminAddSlot()">＋ 添加班次</button></div>
+      <div style="display:flex;gap:8px;margin-top:6px;"><button class="btn small" onclick="saveSlots()">保存班次时间（仅本月）</button><button class="btn small ghost" onclick="adminAddSlot()">＋ 添加班次</button></div>
       <span class="muted" id="adm-slots-msg"></span>
-      <p class="muted" style="margin-top:6px;font-size:12px;">删除班次会清除该班次本月的全部排班数据（60秒内可撤销）。</p>
+      <p class="muted" style="margin-top:6px;font-size:12px;">删除班次会清除该班次本月的全部排班数据（60秒内可撤销），且会从所有月份移除该班次。</p>
+    </div>
+    <div class="adm-sec">
+      <h4>时间模板（保存常用时间组合，供各月一键套用）</h4>
+      <div id="adm-time-patterns"></div>
+      <div style="display:flex;gap:8px;margin-top:6px;"><button class="btn small ghost" onclick="saveCurrentAsPattern()">💾 将本月设置存为新模板</button></div>
     </div>
     <div class="adm-sec">
       <h4>员工管理</h4>
@@ -414,19 +422,22 @@ async function logEvent(roomId, ev){
 
 /* ===== 状态 ===== */
 let currentUser=null, viewYear=2026, viewMonth=1;
-let monthData={}, slots=JSON.parse(JSON.stringify(DEFAULT_SLOTS));
-let unsubMonth=null, unsubSlots=null;
+let monthData={}, baseSlots=JSON.parse(JSON.stringify(DEFAULT_SLOTS)), monthTimeOverride={}, slots=JSON.parse(JSON.stringify(DEFAULT_SLOTS)), timePatterns={};
+let unsubMonth=null, unsubSlots=null, unsubMonthTimes=null, unsubTimePatterns=null;
 let sheetDay=null, detailCtx=null, memoCtx=null;
 let currentRoomId='iidabashi';
 
 const $=id=>document.getElementById(id);
 function entriesOf(x){if(!x)return[];if(Array.isArray(x))return x.map((v,i)=>[String(i),v]).filter(([,v])=>v!=null);return Object.entries(x).filter(([,v])=>v!=null);}
 function slotList(){return entriesOf(slots).sort((a,b)=>(a[1].order||0)-(b[1].order||0));}
+function recomputeSlots(){const ns={};for(const[id,s]of Object.entries(baseSlots||{})){const ov=monthTimeOverride[id];ns[id]={order:s.order,time:(ov!=null?ov:s.time)};}slots=ns;}
 function getDayData(day){if(!monthData)return null;return monthData[day]||monthData[String(day)]||null;}
 function getSlotData(day,slotId){const d=getDayData(day);return(d&&d[slotId])||null;}
 function roleHolder(day,slotId,k){const s=getSlotData(day,slotId);const v=s&&s[k];return(v&&v.id)?v:null;}
 const monthPath=()=>`rooms/${currentRoomId}/shifts/${viewYear}/${viewMonth}`;
 const slotsPath=()=>`rooms/${currentRoomId}/slots`;
+const monthTimesPath=()=>`rooms/${currentRoomId}/monthTimes/${viewYear}/${viewMonth}`;
+const timePatternsPath=()=>`rooms/${currentRoomId}/timePatterns`;
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function qs(name){return new URLSearchParams(location.search).get(name);}
 
@@ -446,7 +457,8 @@ function hideBanner(){$('banner').classList.remove('show');}
 
 /* ===== 同步状态 ===== */
 const syncEl=$('sync-status');
-function setSync(state){if(state==='online'){syncEl.className='show online';syncEl.textContent='🍃 实时同步中';}else if(state==='connecting'){syncEl.className='show connecting';syncEl.textContent='🔌 连接中…';}else{syncEl.className='show mock';syncEl.textContent='⚠️ 演示模式（仅本机）';}}
+let syncHideTimer=null;
+function setSync(state){clearTimeout(syncHideTimer);syncEl.style.opacity='1';if(state==='online'){syncEl.className='show online';syncEl.textContent='🍃 实时同步中';syncHideTimer=setTimeout(function(){syncEl.style.opacity='0';syncHideTimer=setTimeout(function(){syncEl.className='';syncEl.style.opacity='1';},400);},2500);}else if(state==='connecting'){syncEl.className='show connecting';syncEl.textContent='🔌 连接中…';}else{syncEl.className='show mock';syncEl.textContent='⚠️ 演示模式（仅本机）';}}
 if(USE_MOCK)setSync('mock');else{setSync('connecting');try{DB.raw.ref('.info/connected').on('value',s=>setSync(s.val()===true?'online':'connecting'));}catch(e){}}
 
 /* ===== 注册 / 登录 / Help ===== */
@@ -646,8 +658,10 @@ function updateHeaderUI(){const logged=!!currentUser;$('btn-register').style.dis
 
 /* ===== 订阅 ===== */
 function subscribeMonth(){if(unsubMonth)unsubMonth();unsubMonth=DB.watch(monthPath(),val=>{monthData=val||{};normalizeMonth();renderCalendar();refreshOpenViews();});}
-function subscribeSlots(){if(unsubSlots)unsubSlots();unsubSlots=DB.watch(slotsPath(),val=>{slots=val||JSON.parse(JSON.stringify(DEFAULT_SLOTS));renderBanLegend();renderCalendar();refreshOpenViews();});}
-function navMonth(d){let y=viewYear,m=viewMonth+d;if(m<1){m=12;y--;}if(m>12){m=1;y++;}if(y<2026)return;viewYear=y;viewMonth=m;closeAllSheets();subscribeMonth();renderCalendar();}
+function subscribeSlots(){if(unsubSlots)unsubSlots();unsubSlots=DB.watch(slotsPath(),val=>{baseSlots=val||JSON.parse(JSON.stringify(DEFAULT_SLOTS));recomputeSlots();renderBanLegend();renderCalendar();refreshOpenViews();});}
+function subscribeMonthTimes(){if(unsubMonthTimes)unsubMonthTimes();unsubMonthTimes=DB.watch(monthTimesPath(),val=>{monthTimeOverride=val||{};recomputeSlots();renderBanLegend();renderCalendar();refreshOpenViews();});}
+function subscribeTimePatterns(){if(unsubTimePatterns)unsubTimePatterns();unsubTimePatterns=DB.watch(timePatternsPath(),val=>{timePatterns=val||{};if($('sheet-admin').classList.contains('open'))renderTimePatterns();});}
+function navMonth(d){let y=viewYear,m=viewMonth+d;if(m<1){m=12;y--;}if(m>12){m=1;y++;}if(y<2026)return;viewYear=y;viewMonth=m;closeAllSheets();subscribeMonth();subscribeMonthTimes();renderCalendar();}
 
 /* ===== 日历 ===== */
 function renderBanLegend(){$('ban-legend').innerHTML=slotList().map(([,s])=>`<div>${CIRCLED[s.order-1]||s.order}${esc(s.time)}</div>`).join('');}
@@ -936,30 +950,26 @@ function renderMyShift(){
 function roomNameTxt(){return $('room-name').textContent||'直播间';}
 
 /* ===== 管理面板（班次/员工/总览） ===== */
-function openAdmin(){renderAdminSlots();renderAdminUsers();renderAdminShifts();openSheet('sheet-admin');}
-function renderAdminSlots(){const wrap=$('adm-slots');if($('adm-slot-room'))$('adm-slot-room').textContent=roomNameTxt();wrap.innerHTML='';
+function openAdmin(){renderAdminSlots();renderTimePatterns();renderAdminUsers();renderAdminShifts();openSheet('sheet-admin');}
+function renderAdminSlots(){const wrap=$('adm-slots');if($('adm-slot-room'))$('adm-slot-room').textContent=roomNameTxt();if($('adm-slots-month'))$('adm-slots-month').textContent=`${viewYear}年${viewMonth}月`;wrap.innerHTML='';
   slotList().forEach(([slotId,s],idx)=>{const row=document.createElement('div');row.className='adm-slot';row.innerHTML=`<span>${idx+1}班</span>`;
     const input=document.createElement('input');input.value=s.time;input.dataset.slot=slotId;row.appendChild(input);
     const del=document.createElement('button');del.className='btn small danger';del.textContent='删除';del.onclick=()=>adminDeleteSlot(slotId,idx+1);row.appendChild(del);wrap.appendChild(row);});}
 function timeToMinutes(t){if(!t||typeof t!=='string')return 99999;const m=t.match(/(\d{1,2}):(\d{2})/);if(!m)return 99999;return parseInt(m[1],10)*60+parseInt(m[2],10);}
-async function saveSlots(){const entries=[];document.querySelectorAll('#adm-slots input').forEach(input=>entries.push([input.dataset.slot,{time:input.value.trim()||'未设置'}]));
-  entries.sort((a,b)=>timeToMinutes(a[1].time)-timeToMinutes(b[1].time));const ns={};entries.forEach(([id,s],i)=>ns[id]={order:i+1,time:s.time});
-  await DB.set(slotsPath(),ns);logEvent(currentRoomId,{action:'slot_save',target:'班次时间设置',after:entries.map(e=>e[1].time).join(',')});
-  if($('sheet-admin').classList.contains('open'))renderAdminSlots();$('adm-slots-msg').textContent=' 已保存（按开始时间排序）✓';setTimeout(()=>{$('adm-slots-msg').textContent='';},2500);}
-async function adminAddSlot(){const editing={};const inputs=document.querySelectorAll('#adm-slots input');
-  if(inputs.length)inputs.forEach((input,i)=>editing[input.dataset.slot]={order:i+1,time:input.value.trim()||'未设置'});else slotList().forEach(([id,s],i)=>editing[id]={order:i+1,time:s.time});
-  const used=new Set([...Object.keys(editing),...Object.keys(slots||{})]);let nid=null;for(let n=1;n<=99;n++){if(!used.has('s'+n)){nid='s'+n;break;}}
-  if(!nid){alert('班次数已达上限');return;}editing[nid]={time:'00:00〜00:00'};
-  const sorted=Object.entries(editing).sort((a,b)=>timeToMinutes(a[1].time)-timeToMinutes(b[1].time));const ns={};sorted.forEach(([id,s],i)=>ns[id]={order:i+1,time:s.time});
+async function saveSlots(){const overrides={};document.querySelectorAll('#adm-slots input').forEach(input=>{overrides[input.dataset.slot]=input.value.trim()||'未设置';});
+  await DB.set(monthTimesPath(),overrides);logEvent(currentRoomId,{action:'slot_save',target:`${viewYear}/${viewMonth} 班次时间设置`,after:Object.values(overrides).join(',')});
+  if($('sheet-admin').classList.contains('open'))renderAdminSlots();$('adm-slots-msg').textContent=' 已保存（仅本月生效）✓';setTimeout(()=>{$('adm-slots-msg').textContent='';},2500);}
+async function adminAddSlot(){const used=new Set(Object.keys(baseSlots||{}));let nid=null;for(let n=1;n<=99;n++){if(!used.has('s'+n)){nid='s'+n;break;}}
+  if(!nid){alert('班次数已达上限');return;}
+  const ns=JSON.parse(JSON.stringify(baseSlots||{}));ns[nid]={order:Object.keys(ns).length+1,time:'00:00〜00:00'};
   await DB.set(slotsPath(),ns);logEvent(currentRoomId,{action:'slot_add',target:'新增班次'});
   if($('sheet-admin').classList.contains('open'))renderAdminSlots();$('adm-slots-msg').textContent=' 已添加新班次✓';setTimeout(()=>{$('adm-slots-msg').textContent='';},3000);}
 const UNDO_WINDOW_MS=60*1000;let lastDeletedSlot=null,undoHideTimer=null,undoTickTimer=null;
 async function adminDeleteSlot(slotId,displayOrder){const list=slotList();if(list.length<=1){alert('至少需要保留一个班次');return;}
   if(!confirm(`确定删除「${displayOrder}班」吗？\n该班次本月的排班数据将一同删除（60秒内可撤销）。`))return;
-  const slotSnap=slots[slotId]?{...slots[slotId]}:null;const shiftSnap={};entriesOf(monthData).forEach(([day,dd])=>{if(dd&&dd[slotId])shiftSnap[day]=JSON.parse(JSON.stringify(dd[slotId]));});
+  const slotSnap=baseSlots[slotId]?{...baseSlots[slotId]}:null;const shiftSnap={};entriesOf(monthData).forEach(([day,dd])=>{if(dd&&dd[slotId])shiftSnap[day]=JSON.parse(JSON.stringify(dd[slotId]));});
   lastDeletedSlot={slotId,slot:slotSnap,shiftData:shiftSnap,roomId:currentRoomId,monthY:viewYear,monthM:viewMonth,displayOrder};
-  const editing={};document.querySelectorAll('#adm-slots input').forEach(input=>{if(input.dataset.slot!==slotId)editing[input.dataset.slot]={time:input.value.trim()||'未设置'};});
-  const ordered={};list.filter(([id])=>id!==slotId).forEach(([id],i)=>{ordered[id]={order:i+1,time:editing[id]?editing[id].time:slots[id].time};});
+  const ordered={};Object.entries(baseSlots).filter(([id])=>id!==slotId).sort((a,b)=>(a[1].order||0)-(b[1].order||0)).forEach(([id,s],i)=>{ordered[id]={order:i+1,time:s.time};});
   await DB.set(slotsPath(),ordered);for(const[day]of entriesOf(monthData))await DB.remove(`${monthPath()}/${day}/${slotId}`);
   logEvent(currentRoomId,{action:'slot_delete',target:`删除 ${displayOrder}班`});
   if($('sheet-admin').classList.contains('open'))renderAdminSlots();showUndoToast(`已删除「${displayOrder}班」`);}
@@ -967,10 +977,33 @@ function showUndoToast(text){const t=$('undo-toast');$('undo-text').textContent=
   const start=Date.now();const tick=()=>{const left=Math.max(0,UNDO_WINDOW_MS-(Date.now()-start));$('undo-timer').textContent=Math.ceil(left/1000)+'s';};tick();undoTickTimer=setInterval(tick,500);
   undoHideTimer=setTimeout(()=>{t.classList.remove('show');lastDeletedSlot=null;clearInterval(undoTickTimer);},UNDO_WINDOW_MS);}
 async function undoDeleteSlot(){if(!lastDeletedSlot)return;const{slotId,slot,shiftData,roomId,monthY,monthM}=lastDeletedSlot;
-  const editing={};slotList().forEach(([id,s])=>editing[id]={time:s.time});editing[slotId]={time:slot?slot.time:'00:00〜00:00'};
-  const sorted=Object.entries(editing).sort((a,b)=>timeToMinutes(a[1].time)-timeToMinutes(b[1].time));const ns={};sorted.forEach(([id,s],i)=>ns[id]={order:i+1,time:s.time});
+  const ns=JSON.parse(JSON.stringify(baseSlots||{}));ns[slotId]={order:Object.keys(ns).length+1,time:slot?slot.time:'00:00〜00:00'};
   await DB.set(`rooms/${roomId}/slots`,ns);for(const[day,data]of Object.entries(shiftData))await DB.set(`rooms/${roomId}/shifts/${monthY}/${monthM}/${day}/${slotId}`,data);
   lastDeletedSlot=null;clearTimeout(undoHideTimer);clearInterval(undoTickTimer);$('undo-toast').classList.remove('show');if($('sheet-admin').classList.contains('open'))renderAdminSlots();}
+function timePatternsPathList(){return entriesOf(timePatterns);}
+function renderTimePatterns(){const wrap=$('adm-time-patterns');if(!wrap)return;wrap.innerHTML='';
+  const list=timePatternsPathList();
+  if(!list.length){wrap.innerHTML='<p class="muted" style="font-size:12px;">暂无模板</p>';return;}
+  list.forEach(([pid,p])=>{const row=document.createElement('div');row.className='adm-pattern-row';
+    const label=document.createElement('span');label.className='adm-pattern-name';label.textContent=p.name;row.appendChild(label);
+    const apply=document.createElement('button');apply.className='btn small';apply.textContent='套用到本月';apply.onclick=()=>applyTimePattern(pid);row.appendChild(apply);
+    const del=document.createElement('button');del.className='btn small danger';del.textContent='删除';del.onclick=()=>deleteTimePattern(pid);row.appendChild(del);
+    wrap.appendChild(row);});}
+async function saveCurrentAsPattern(){const name=(prompt('模板名称（例：夏季档期）')||'').trim();if(!name)return;
+  const times={};slotList().forEach(([,s],idx)=>{times[idx+1]=s.time;});
+  const pid='p'+Date.now();await DB.set(`${timePatternsPath()}/${pid}`,{name,times});
+  logEvent(currentRoomId,{action:'pattern_save',target:`时间模板「${name}」`});
+  $('adm-slots-msg').textContent=' 模板已保存✓';setTimeout(()=>{$('adm-slots-msg').textContent='';},2500);}
+async function applyTimePattern(pid){const p=timePatterns[pid];if(!p)return;
+  if(!confirm(`将「${p.name}」套用到 ${viewYear}年${viewMonth}月 的班次时间？`))return;
+  const overrides={};slotList().forEach(([slotId],idx)=>{const t=p.times[idx+1];if(t)overrides[slotId]=t;});
+  await DB.set(monthTimesPath(),overrides);
+  logEvent(currentRoomId,{action:'pattern_apply',target:`${viewYear}/${viewMonth} 套用模板「${p.name}」`});
+  renderAdminSlots();$('adm-slots-msg').textContent=` 已套用「${p.name}」✓`;setTimeout(()=>{$('adm-slots-msg').textContent='';},2500);}
+async function deleteTimePattern(pid){const p=timePatterns[pid];if(!p)return;
+  if(!confirm(`删除模板「${p.name}」？`))return;
+  await DB.remove(`${timePatternsPath()}/${pid}`);
+  logEvent(currentRoomId,{action:'pattern_delete',target:`删除时间模板「${p.name}」`});}
 async function renderAdminUsers(){const wrap=$('adm-users');const users=await DB.get('users');wrap.innerHTML='';const list=entriesOf(users);
   if(!list.length){wrap.innerHTML='<p class="muted">暂无员工</p>';return;}
   list.forEach(([uid,u])=>{const row=document.createElement('div');row.className='adm-user';
@@ -1012,7 +1045,7 @@ async function ensureRoom(){
 (async function init(){
   const now=new Date();viewYear=Math.max(now.getFullYear(),2026);viewMonth=now.getFullYear()>=2026?now.getMonth()+1:1;
   await ensureRoom();
-  subscribeSlots();subscribeMonth();setupCalendarSwipe();
+  subscribeSlots();subscribeMonth();subscribeMonthTimes();subscribeTimePatterns();setupCalendarSwipe();
   const saved=loadSession();if(saved){enterApp(saved);return;}updateHeaderUI();
 })();
 function bumpSession(){if(currentUser)saveSession(currentUser);}

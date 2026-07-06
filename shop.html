@@ -161,7 +161,7 @@ const EYE_OFF='<svg viewBox="0 0 24 24" width="20" height="20" fill="none" strok
 (function(){const b=$('s-eye'),inp=$('s-pw');if(!b||!inp)return;b.innerHTML=EYE;let on=false;
   b.onclick=()=>{on=!on;inp.type=on?'text':'password';b.innerHTML=on?EYE_OFF:EYE;};})();
 
-let roomId=null,roomName='',shopName='',slots={},viewYear=2026,viewMonth=6,monthData={};
+let roomId=null,roomName='',shopName='',baseSlots={},slots={},viewYear=2026,viewMonth=6,monthData={};
 
 async function listRoomIds(){try{const r=await fetch(BASE+'/rooms.json?shallow=true');const j=await r.json();return j?Object.keys(j):[];}catch(e){return[];}}
 
@@ -186,13 +186,18 @@ async function enterApp(){
   roomName=await DB.get(`rooms/${roomId}/name`)||roomId;
   $('shop-name').textContent=shopName;$('room-name').textContent=roomName;
   document.title='Pantera · '+roomName;
-  slots=await DB.get(`rooms/${roomId}/slots`)||{};
-  renderBanLegend();
+  baseSlots=await DB.get(`rooms/${roomId}/slots`)||{};
   const now=new Date();viewYear=Math.max(now.getFullYear(),2026);viewMonth=now.getFullYear()>=2026?now.getMonth()+1:6;
+  await loadMonthTimes();
   subscribeMonth();
 }
 function slotList(){return entriesOf(slots).sort((a,b)=>(a[1].order||0)-(b[1].order||0));}
 function renderBanLegend(){$('ban-legend').innerHTML=slotList().map(([,s])=>`<div>${CIRCLED[s.order-1]||s.order}${esc(s.time)}</div>`).join('');}
+async function loadMonthTimes(){
+  const ov=await DB.get(`rooms/${roomId}/monthTimes/${viewYear}/${viewMonth}`)||{};
+  const ns={};Object.entries(baseSlots).forEach(([id,s])=>{ns[id]={order:s.order,time:(ov[id]!=null?ov[id]:s.time)};});
+  slots=ns;renderBanLegend();
+}
 let unsub=null;
 function subscribeMonth(){
   if(unsub)unsub();
@@ -200,7 +205,7 @@ function subscribeMonth(){
   const h=ref.on('value',s=>{monthData=s.val()||{};renderCalendar();});
   unsub=()=>ref.off('value',h);
 }
-function navMonth(d){let y=viewYear,m=viewMonth+d;if(m<1){m=12;y--;}if(m>12){m=1;y++;}if(y<2026)return;viewYear=y;viewMonth=m;subscribeMonth();}
+function navMonth(d){let y=viewYear,m=viewMonth+d;if(m<1){m=12;y--;}if(m>12){m=1;y++;}if(y<2026)return;viewYear=y;viewMonth=m;loadMonthTimes();subscribeMonth();}
 function getSlot(day,slotId){const dd=monthData[day]||monthData[String(day)];return(dd&&dd[slotId])||null;}
 function banRowColor(day,slotId){const s=getSlot(day,slotId);const has=k=>(s&&s[k]&&s[k].id)?1:0;const G=has('A')+has('B'),H=has('C')+has('D'),I=has('E')+has('F');const g=(G>0?1:0)+(H>0?1:0)+(I>0?1:0);if(g===0)return'var(--red)';if(g===1)return'var(--yellow)';if(G===1&&H===1&&I===0)return'var(--green)';return'var(--blue)';}
 function renderCalendar(){

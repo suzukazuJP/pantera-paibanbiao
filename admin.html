@@ -367,6 +367,7 @@ document.addEventListener('paste',e=>{
 /* ===== 迟到统计 ===== */
 function timeToMinutes(t){if(!t||typeof t!=='string')return 99999;const m=t.match(/(\d{1,2}):(\d{2})/);if(!m)return 99999;return parseInt(m[1],10)*60+parseInt(m[2],10);}
 function shiftStartTs(y,mo,d,time){return new Date(y,mo-1,d).getTime()+timeToMinutes(time)*60000;}
+function mergeSlotTimes(sl,overrides){const ov=overrides||{};const ns={};Object.entries(sl||{}).forEach(([id,s])=>{ns[id]={order:s.order,time:(ov[id]!=null?ov[id]:s.time)};});return ns;}
 let lateYear=2026,lateMonth=6,lateRows=[];
 function lateNav(d){let y=lateYear,m=lateMonth+d;if(m<1){m=12;y--;}if(m>12){m=1;y++;}if(y<2026)return;lateYear=y;lateMonth=m;loadLate();}
 async function loadLate(){
@@ -375,6 +376,7 @@ async function loadLate(){
   for(const rid of scopeRoomIds()){
     const md=await DB.get(`rooms/${rid}/shifts/${lateYear}/${lateMonth}`);if(!md)continue;
     let sl=await DB.get(`rooms/${rid}/slots`);sl=sl||{};
+    const lateMt=await DB.get(`rooms/${rid}/monthTimes/${lateYear}/${lateMonth}`)||{};sl=mergeSlotTimes(sl,lateMt);
     entriesOf(md).forEach(([dayStr,dd])=>{const day=parseInt(dayStr,10);if(!day||!dd)return;
       Object.entries(dd).forEach(([slotId,slot])=>{if(slotId==='memo'||!slot)return;const s=sl[slotId]||{order:0,time:slotId};
         ROLES.forEach(r=>{const h=slot[r.key];if(h&&h.id){const hasChk=!!(h.checkIn&&h.checkInBy);const startTs=shiftStartTs(lateYear,lateMonth,day,s.time);const min=hasChk?Math.max(0,Math.round((h.checkIn-startTs)/60000)):0;const late=hasChk?h.checkIn>startTs:false;
@@ -460,10 +462,12 @@ async function loadDashboard(){
   const newUsers=usersCache.filter(x=>{if(!x.createdAt)return false;const d=new Date(x.createdAt);return d.getFullYear()===dashYear&&(d.getMonth()+1)===dashMonth;}).length;
 
   const roomStats=[];
-  const slotsByRoom={};
+  const slotsByRoom={};const baseSlotsByRoom={};
   let totFilled=0,totSlots=0,totStatus={green:0,yellow:0,red:0,blue:0,gray:0};
   for(const rid of roomIds){
-    let sl=await DB.get(`rooms/${rid}/slots`);sl=sl||{};slotsByRoom[rid]=sl;
+    let baseSl=await DB.get(`rooms/${rid}/slots`);baseSl=baseSl||{};baseSlotsByRoom[rid]=baseSl;
+    const dashMt=await DB.get(`rooms/${rid}/monthTimes/${dashYear}/${dashMonth}`)||{};
+    const sl=mergeSlotTimes(baseSl,dashMt);slotsByRoom[rid]=sl;
     const slIds=Object.keys(sl);
     const md=await DB.get(`rooms/${rid}/shifts/${dashYear}/${dashMonth}`);
     const daysInMonth=new Date(dashYear,dashMonth,0).getDate();
@@ -490,7 +494,7 @@ async function loadDashboard(){
   const trend=[];
   for(const{y,m}of trendMonths){
     let total=0,late=0;
-    for(const rid of roomIds){const md=await DB.get(`rooms/${rid}/shifts/${y}/${m}`);const c=monthLateCounts(y,m,slotsByRoom[rid],md);total+=c.total;late+=c.late;}
+    for(const rid of roomIds){const md=await DB.get(`rooms/${rid}/shifts/${y}/${m}`);const mt=await DB.get(`rooms/${rid}/monthTimes/${y}/${m}`)||{};const sl=mergeSlotTimes(baseSlotsByRoom[rid],mt);const c=monthLateCounts(y,m,sl,md);total+=c.total;late+=c.late;}
     trend.push({y,m,total,late});
   }
   /* 本月迟到排行 */
@@ -1055,6 +1059,7 @@ async function loadOverview(){
   for(const rid of scopeRoomIds()){
     const md=await DB.get(`rooms/${rid}/shifts/${ovYear}/${ovMonth}`);if(!md)continue;
     let sl=await DB.get(`rooms/${rid}/slots`);sl=sl||{};
+    const ovMt=await DB.get(`rooms/${rid}/monthTimes/${ovYear}/${ovMonth}`)||{};sl=mergeSlotTimes(sl,ovMt);
     const slById={};entriesOf(sl).forEach(([id,s])=>slById[id]=s);
     entriesOf(md).forEach(([dayStr,dd])=>{const day=parseInt(dayStr,10);if(!day||!dd)return;
       Object.entries(dd).forEach(([slotId,slot])=>{if(slotId==='memo'||!slot)return;const s=slById[slotId]||{order:0,time:slotId};
