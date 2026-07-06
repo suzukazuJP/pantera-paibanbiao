@@ -7,6 +7,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
 <style>
@@ -82,6 +83,8 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
 .owner-box input{width:100%;}
 .btn-s{padding:6px 11px;font-size:12px;font-weight:600;}
 .b-blue{background:#3a6ea5;color:#fff;}.b-gold{background:#caa64a;color:#1a1a1a;}.b-red{background:#b0413a;color:#fff;}.b-gray{background:var(--panel2);color:var(--ink);border:1px solid var(--line);}
+.pd-tab{background:var(--panel2);color:var(--ink);border:1px solid var(--line);}
+.pd-tab.on{background:var(--accent);color:#10241d;border-color:var(--accent);}
 .add-room{background:var(--panel);border:1px dashed var(--line);border-radius:10px;padding:14px;margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
 .late-dd{background:var(--panel2);border:1px solid var(--line);border-radius:6px;font-size:11px;padding:0;margin:0;list-style:none;min-width:200px;display:none;}
 .late-dd.open{display:block;}
@@ -174,6 +177,7 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
     <button class="tab" data-tab="users" onclick="switchTab('users')">员工</button>
     <button class="tab" data-tab="late" onclick="switchTab('late')">迟到统计</button>
     <button class="tab" data-tab="livedata" onclick="switchTab('livedata')">直播数据</button>
+    <button class="tab" data-tab="charts" onclick="switchTab('charts')">数据图表</button>
     <button class="tab" data-tab="rooms" onclick="switchTab('rooms')">直播间管理</button>
     <button class="tab" data-tab="messages" onclick="switchTab('messages')">消息</button>
   </div>
@@ -258,6 +262,23 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
         </div>
         <h4 style="color:var(--accent);font-size:13px;margin:14px 0 8px;">已保存的场次</h4>
         <div id="ld-sess-list"></div>
+      </div>
+    </div>
+    <!-- 数据图表 -->
+    <div class="panel" id="panel-charts">
+      <div class="toolbar">
+        <select id="chart-room" onchange="chartRoom=this.value;loadCharts()"></select>
+        <select id="chart-metric" onchange="chartMetric=this.value;loadCharts()"></select>
+        <span style="flex:1"></span>
+        <button class="btn-s pd-tab" data-pd="day" onclick="setChartPeriod('day')">日</button>
+        <button class="btn-s pd-tab" data-pd="week" onclick="setChartPeriod('week')">周</button>
+        <button class="btn-s pd-tab" data-pd="month" onclick="setChartPeriod('month')">月</button>
+        <button class="btn-s pd-tab" data-pd="year" onclick="setChartPeriod('year')">年</button>
+      </div>
+      <div class="scroll">
+        <div id="chart-kpi" class="kpi-row"></div>
+        <div style="position:relative;height:340px;max-width:960px;"><canvas id="chart-canvas"></canvas></div>
+        <p class="muted" id="chart-note" style="margin-top:10px;font-size:12px;"></p>
       </div>
     </div>
     <!-- rooms -->
@@ -349,8 +370,68 @@ function switchTab(t){
   else if(t==='users')loadUsers();
   else if(t==='late')loadLate();
   else if(t==='livedata')initLiveData();
+  else if(t==='charts')initCharts();
   else if(t==='rooms')renderRooms();
   else if(t==='messages')loadMessages();
+}
+/* ===== 数据图表（直播数据のtime-series・直播间別） ===== */
+const LIVE_SUM_KEYS=new Set(['gmv','orders','exposure','views','viewersNow','productClicks','newFollowers']);
+const CHART_RANGE_LABEL={day:'最近30天',week:'最近12周',month:'最近12个月',year:'最近5年'};
+let chartPeriod='day',chartRoom='all',chartMetric='gmv',chartInst=null;
+function initCharts(){
+  const rs=$('chart-room');
+  rs.innerHTML='<option value="all">全部直播间</option>'+Object.entries(rooms).map(([id,r])=>`<option value="${esc(id)}">${esc(r.name||id)}</option>`).join('');
+  if(chartRoom==='all'&&scope!=='all'&&rooms[scope])chartRoom=scope;
+  if(chartRoom!=='all'&&!rooms[chartRoom])chartRoom='all';
+  rs.value=chartRoom;
+  $('chart-metric').innerHTML=LIVE_FIELDS.map(f=>`<option value="${f.key}">${esc(f.label)}${f.unit?`（${f.unit}）`:''}</option>`).join('');
+  $('chart-metric').value=chartMetric;
+  document.querySelectorAll('.pd-tab').forEach(b=>b.classList.toggle('on',b.dataset.pd===chartPeriod));
+  loadCharts();
+}
+function setChartPeriod(p){chartPeriod=p;document.querySelectorAll('.pd-tab').forEach(b=>b.classList.toggle('on',b.dataset.pd===p));loadCharts();}
+function mondayOf(d){const x=new Date(d.getFullYear(),d.getMonth(),d.getDate());const wd=(x.getDay()+6)%7;x.setDate(x.getDate()-wd);return x;}
+function chartBuckets(period){
+  const t=new Date();const list=[];
+  if(period==='day'){for(let i=29;i>=0;i--){const d=new Date(t.getFullYear(),t.getMonth(),t.getDate()-i);list.push({key:`${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`,label:`${d.getMonth()+1}/${d.getDate()}`});}}
+  else if(period==='week'){const m0=mondayOf(t);for(let i=11;i>=0;i--){const d=new Date(m0.getFullYear(),m0.getMonth(),m0.getDate()-i*7);list.push({key:`w${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`,label:`${d.getMonth()+1}/${d.getDate()}`});}}
+  else if(period==='month'){for(let i=11;i>=0;i--){let y=t.getFullYear(),m=t.getMonth()-i;while(m<0){m+=12;y--;}list.push({key:`${y}-${m+1}`,label:`${y}/${m+1}`});}}
+  else{for(let i=4;i>=0;i--){const y=t.getFullYear()-i;list.push({key:`${y}`,label:`${y}`});}}
+  return list;
+}
+function bucketKeyOf(period,y,m,d){
+  if(period==='day')return `${y}-${m}-${d}`;
+  if(period==='week'){const mo=mondayOf(new Date(y,m-1,d));return `w${mo.getFullYear()}-${mo.getMonth()+1}-${mo.getDate()}`;}
+  if(period==='month')return `${y}-${m}`;
+  return `${y}`;
+}
+function fmtChartNum(n){if(n==null||isNaN(n))return '-';if(Math.abs(n)>=1000)return Math.round(n).toLocaleString();return String(Math.round(n*100)/100);}
+async function loadCharts(){
+  const metric=chartMetric;const field=LIVE_FIELDS.find(f=>f.key===metric)||LIVE_FIELDS[0];
+  const isSum=LIVE_SUM_KEYS.has(metric);
+  const rids=chartRoom==='all'?Object.keys(rooms):[chartRoom];
+  const buckets=chartBuckets(chartPeriod);const idx={};buckets.forEach((b,i)=>idx[b.key]=i);
+  const sum=new Array(buckets.length).fill(0),cnt=new Array(buckets.length).fill(0);
+  for(const rid of rids){
+    const stats=await DB.get(`rooms/${rid}/liveStats`);if(!stats)continue;
+    entriesOf(stats).forEach(([yStr,yObj])=>{const y=parseInt(yStr,10);entriesOf(yObj).forEach(([mStr,mObj])=>{const m=parseInt(mStr,10);entriesOf(mObj).forEach(([dStr,dObj])=>{const d=parseInt(dStr,10);entriesOf(dObj).forEach(([,rec])=>{
+      if(!rec)return;const v=rec[metric];if(v==null||isNaN(v))return;const i=idx[bucketKeyOf(chartPeriod,y,m,d)];if(i==null)return;sum[i]+=Number(v);cnt[i]++;
+    });});});});
+  }
+  const data=buckets.map((b,i)=>isSum?sum[i]:(cnt[i]?sum[i]/cnt[i]:0));
+  const totalSessions=cnt.reduce((a,b)=>a+b,0);
+  let agg;if(isSum)agg=data.reduce((a,b)=>a+b,0);else{const nz=data.filter((v,i)=>cnt[i]>0);agg=nz.length?nz.reduce((a,b)=>a+b,0)/nz.length:0;}
+  $('chart-kpi').innerHTML=`<div class="kpi-card"><div class="num">${fmtChartNum(agg)}</div><div class="lbl">${isSum?'区间合计':'区间平均'}·${esc(field.label)}${field.unit?`(${esc(field.unit)})`:''}</div></div><div class="kpi-card"><div class="num">${totalSessions}</div><div class="lbl">场次数</div></div>`;
+  $('chart-note').textContent=`${chartRoom==='all'?'全部直播间':((rooms[chartRoom]||{}).name||chartRoom)} · ${CHART_RANGE_LABEL[chartPeriod]} · ${isSum?'各时段合计（求和）':'各时段平均'}`;
+  drawChart(buckets.map(b=>b.label),data,field,isSum);
+}
+function drawChart(labels,data,field,isSum){
+  if(typeof Chart==='undefined'){$('chart-note').textContent='图表库加载失败（请检查网络后刷新）';return;}
+  const ctx=$('chart-canvas').getContext('2d');if(chartInst)chartInst.destroy();
+  const accent='#7fd1b9';
+  chartInst=new Chart(ctx,{type:isSum?'bar':'line',
+    data:{labels,datasets:[{label:field.label+(field.unit?`(${field.unit})`:''),data,backgroundColor:isSum?'rgba(127,209,185,0.55)':'rgba(127,209,185,0.15)',borderColor:accent,borderWidth:2,tension:0.25,pointRadius:isSum?0:3,fill:!isSum}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#e6e8ec'}}},scales:{x:{ticks:{color:'#8a93a3',maxRotation:0,autoSkip:true},grid:{color:'rgba(255,255,255,0.05)'}},y:{beginAtZero:true,ticks:{color:'#8a93a3'},grid:{color:'rgba(255,255,255,0.06)'}}}}});
 }
 document.addEventListener('paste',e=>{
   if(!$('panel-livedata')||!$('panel-livedata').classList.contains('show'))return;
