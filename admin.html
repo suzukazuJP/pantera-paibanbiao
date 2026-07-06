@@ -883,32 +883,82 @@ function enhanceForOcr(ctx,w,h){
   }
   ctx.putImageData(imgData,0,0);
 }
-function downscaleImageFile(file,maxDim){
+function decodeImageFile(file){
   return new Promise((resolve,reject)=>{
     const img=new Image();const url=URL.createObjectURL(file);
-    img.onload=()=>{
-      URL.revokeObjectURL(url);
-      let w=img.naturalWidth,h=img.naturalHeight;
-      if(Math.max(w,h)>maxDim){const s=maxDim/Math.max(w,h);w=Math.round(w*s);h=Math.round(h*s);}
-      const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
-      const ctx=canvas.getContext('2d');ctx.drawImage(img,0,0,w,h);
-      enhanceForOcr(ctx,w,h);
-      canvas.toBlob(b=>b?resolve(b):reject(new Error('压缩图片失败')),'image/png');
-    };
+    img.onload=()=>{URL.revokeObjectURL(url);resolve(img);};
     img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error('图片加载失败'));};
     img.src=url;
   });
+}
+/* 顶部胶囊（浏览人数=4.91K 等）は目のアイコンと密着＋数字が小さいため、全图OCRでは数字が壊れやすい
+   （4.91K→"Gok"）。全图OCRの単語座標からラベル右隣の数値领域を特定し、元画像から切り出して拡大再認識で救済する。
+   "4 91k" のように小数点が空白落ちするケースは「空白＝小数点」として復元する。 */
+function parseRescuedNum(s){
+  if(!s)return null;s=String(s).trim();
+  let m=s.match(/(\d+)\s+(\d+)\s*(K|k|万)/);
+  if(m)return parseFloat(m[1]+'.'+m[2])*(m[3]==='万'?10000:1000);
+  m=s.match(/(\d+(?:\.\d+)?)\s*(K|k|万)/);
+  if(m)return parseFloat(m[1])*(m[2]==='万'?10000:1000);
+  m=s.match(/\d+(?:\.\d+)?/);
+  return m?parseFloat(m[0]):null;
+}
+function locateValueBoxAfterLabel(words,labelText){
+  for(let i=0;i<words.length;i++){
+    let concat='';let j=i;
+    while(j<words.length&&concat.length<labelText.length+3){concat+=normLabel(words[j].text);j++;if(normLabel(concat).includes(labelText))break;}
+    if(!normLabel(concat).includes(labelText))continue;
+    const last=words[j-1];const cy=(last.bbox.y0+last.bbox.y1)/2;
+    let best=null;
+    for(let k=j;k<words.length;k++){
+      const w=words[k];const wcy=(w.bbox.y0+w.bbox.y1)/2;
+      if(Math.abs(wcy-cy)<22&&w.bbox.x0>=last.bbox.x1-4&&(!best||w.bbox.x0<best.bbox.x0))best=w;
+    }
+    if(best)return best.bbox;
+  }
+  return null;
+}
+async function ocrRegion(srcImg,box,scale){
+  const pad=8;
+  const sx=Math.max(0,box.x0-pad),sy=Math.max(0,box.y0-pad),sw=(box.x1-box.x0)+pad*2,sh=(box.y1-box.y0)+pad*2;
+  const c=document.createElement('canvas');c.width=Math.round(sw*scale);c.height=Math.round(sh*scale);
+  const cx=c.getContext('2d');cx.imageSmoothingEnabled=true;cx.imageSmoothingQuality='high';
+  cx.drawImage(srcImg,sx,sy,sw,sh,0,0,c.width,c.height);
+  enhanceForOcr(cx,c.width,c.height);
+  const blob=await new Promise(r=>c.toBlob(b=>r(b),'image/png'));
+  const r=await Tesseract.recognize(blob,'eng');
+  return (r.data.text||'').trim();
 }
 async function ldHandleFile(file){
   if(!file)return;
   const st=$('ld-status');st.className='ld-status busy';st.textContent='正在压缩图片…';
   try{
-    const small=await downscaleImageFile(file,2400);
+    const origImg=await decodeImageFile(file);
+    const maxDim=2400;
+    let w=origImg.naturalWidth,h=origImg.naturalHeight;
+    if(Math.max(w,h)>maxDim){const s=maxDim/Math.max(w,h);w=Math.round(w*s);h=Math.round(h*s);}
+    const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
+    const cx=canvas.getContext('2d');cx.drawImage(origImg,0,0,w,h);
+    enhanceForOcr(cx,w,h);
+    const blob=await new Promise((res,rej)=>canvas.toBlob(b=>b?res(b):rej(new Error('压缩图片失败')),'image/png'));
     st.textContent='识别中…（首次使用需下载识别引擎，可能需要几十秒）';
-    const {data}=await Tesseract.recognize(small,'chi_sim+eng');
+    const {data}=await Tesseract.recognize(blob,'chi_sim+eng');
     $('ld-raw-wrap').style.display='block';$('ld-raw-text').value=data.text||'';
     const parsed=parseLiveStatsText(data.text);
     const hits={};Object.keys(parsed).forEach(k=>hits[k]=true);
+    /* 上部胶囊の数字が壊れて未取得のとき、その领域だけ切り出して拡大再認識で救済 */
+    const words=(data.words||[]).filter(wd=>wd.text&&wd.text.trim());
+    const scale=origImg.naturalWidth/w;
+    const capsules=[{key:'orders',label:'成交件数'},{key:'viewersNow',label:'浏览人数'}];
+    for(const cap of capsules){
+      if(parsed[cap.key]!=null)continue;
+      const box=locateValueBoxAfterLabel(words,cap.label);if(!box)continue;
+      try{
+        const txt=await ocrRegion(origImg,{x0:box.x0*scale,y0:box.y0*scale,x1:box.x1*scale,y1:box.y1*scale},5);
+        const v=parseRescuedNum(txt);
+        if(v!=null){parsed[cap.key]=v;hits[cap.key]=true;}
+      }catch(e){}
+    }
     renderLdGrid(parsed,hits);
     const n=Object.keys(parsed).length;
     st.className='ld-status';st.textContent=n?`已自动识别 ${n}/${LIVE_FIELDS.length} 项，请核对后保存（未识别到的项请手动填写）。`:'未能自动识别出数据，请手动填写。';
