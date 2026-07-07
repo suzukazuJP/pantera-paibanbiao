@@ -85,6 +85,10 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
 .b-blue{background:#3a6ea5;color:#fff;}.b-gold{background:#caa64a;color:#1a1a1a;}.b-red{background:#b0413a;color:#fff;}.b-gray{background:var(--panel2);color:var(--ink);border:1px solid var(--line);}
 .pd-tab{background:var(--panel2);color:var(--ink);border:1px solid var(--line);}
 .pd-tab.on{background:var(--accent);color:#10241d;border-color:var(--accent);}
+.ai-box{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;max-width:960px;line-height:1.7;font-size:13px;color:var(--ink);}
+.ai-box.err{border-color:#b0413a;color:#e08a8a;}
+.ai-md h3{font-size:14px;color:var(--accent);margin:12px 0 5px;font-weight:700;}
+.ai-md ul{margin:5px 0 5px 18px;}.ai-md li{margin:3px 0;}.ai-md strong{color:var(--accent);}
 .add-room{background:var(--panel);border:1px dashed var(--line);border-radius:10px;padding:14px;margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
 .late-dd{background:var(--panel2);border:1px solid var(--line);border-radius:6px;font-size:11px;padding:0;margin:0;list-style:none;min-width:200px;display:none;}
 .late-dd.open{display:block;}
@@ -239,9 +243,10 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
     <!-- live data -->
     <div class="panel" id="panel-livedata">
       <div class="toolbar">
-        <select id="ld-room" onchange="loadLdSessions()"></select>
+        <select id="ld-room" onchange="onLdRoomChange()"></select>
         <input type="date" id="ld-date" onchange="loadLdSessions()">
         <input type="time" id="ld-time">
+        <select id="ld-slot" title="班次"><option value="">未指定班次</option></select>
         <button class="btn-s b-gray" onclick="loadLdSessions()">刷新列表</button>
       </div>
       <div class="scroll" id="livedata-scroll">
@@ -267,18 +272,24 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
     <!-- 数据图表 -->
     <div class="panel" id="panel-charts">
       <div class="toolbar">
-        <select id="chart-room" onchange="chartRoom=this.value;loadCharts()"></select>
+        <select id="chart-room" onchange="chartRoom=this.value;populateChartSlots();loadCharts()"></select>
         <select id="chart-metric" onchange="chartMetric=this.value;loadCharts()"></select>
-        <span style="flex:1"></span>
+        <select id="chart-slot" onchange="chartSlot=this.value;loadCharts()"><option value="">全部班</option></select>
+        <input type="date" id="chart-from" onchange="chartFrom=this.value;loadCharts()">
+        <span class="muted">~</span>
+        <input type="date" id="chart-to" onchange="chartTo=this.value;loadCharts()">
         <button class="btn-s pd-tab" data-pd="day" onclick="setChartPeriod('day')">日</button>
         <button class="btn-s pd-tab" data-pd="week" onclick="setChartPeriod('week')">周</button>
         <button class="btn-s pd-tab" data-pd="month" onclick="setChartPeriod('month')">月</button>
         <button class="btn-s pd-tab" data-pd="year" onclick="setChartPeriod('year')">年</button>
+        <span style="flex:1"></span>
+        <button class="btn-s b-blue" onclick="runAiAnalysis()">🤖 AI分析</button>
       </div>
       <div class="scroll">
         <div id="chart-kpi" class="kpi-row"></div>
         <div style="position:relative;height:340px;max-width:960px;"><canvas id="chart-canvas"></canvas></div>
         <p class="muted" id="chart-note" style="margin-top:10px;font-size:12px;"></p>
+        <div id="chart-ai" style="display:none;margin-top:14px;"></div>
       </div>
     </div>
     <!-- rooms -->
@@ -374,10 +385,11 @@ function switchTab(t){
   else if(t==='rooms')renderRooms();
   else if(t==='messages')loadMessages();
 }
-/* ===== 数据图表（直播数据のtime-series・直播间別） ===== */
+/* ===== 数据图表（直播数据のtime-series・班別・期間指定・AI分析） ===== */
 const LIVE_SUM_KEYS=new Set(['gmv','orders','exposure','views','viewersNow','productClicks','newFollowers']);
-const CHART_RANGE_LABEL={day:'最近30天',week:'最近12周',month:'最近12个月',year:'最近5年'};
-let chartPeriod='day',chartRoom='all',chartMetric='gmv',chartInst=null;
+const CHART_GRAN_LABEL={day:'按日',week:'按周',month:'按月',year:'按年'};
+let chartPeriod='day',chartRoom='all',chartMetric='gmv',chartSlot='',chartFrom='',chartTo='',chartInst=null;
+function fmtD(d){return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;}
 function initCharts(){
   const rs=$('chart-room');
   rs.innerHTML='<option value="all">全部直播间</option>'+Object.entries(rooms).map(([id,r])=>`<option value="${esc(id)}">${esc(r.name||id)}</option>`).join('');
@@ -386,17 +398,32 @@ function initCharts(){
   rs.value=chartRoom;
   $('chart-metric').innerHTML=LIVE_FIELDS.map(f=>`<option value="${f.key}">${esc(f.label)}${f.unit?`（${f.unit}）`:''}</option>`).join('');
   $('chart-metric').value=chartMetric;
+  if(!chartTo)chartTo=fmtD(new Date());
+  if(!chartFrom)chartFrom=fmtD(new Date(Date.now()-29*864e5));
+  $('chart-from').value=chartFrom;$('chart-to').value=chartTo;
   document.querySelectorAll('.pd-tab').forEach(b=>b.classList.toggle('on',b.dataset.pd===chartPeriod));
+  populateChartSlots();
   loadCharts();
+}
+async function populateChartSlots(){
+  const rids=chartRoom==='all'?Object.keys(rooms):[chartRoom];
+  let max=0;
+  for(const rid of rids){const s=await DB.get(`rooms/${rid}/slots`)||{};Object.values(s).forEach(x=>{if((x.order||0)>max)max=x.order;});}
+  if(max<1)max=5;
+  const opts=['<option value="">全部班</option>','<option value="__by">按班对比</option>'];
+  for(let i=1;i<=max;i++)opts.push(`<option value="${i}">${i}班</option>`);
+  const el=$('chart-slot');if(el){el.innerHTML=opts.join('');el.value=chartSlot;}
 }
 function setChartPeriod(p){chartPeriod=p;document.querySelectorAll('.pd-tab').forEach(b=>b.classList.toggle('on',b.dataset.pd===p));loadCharts();}
 function mondayOf(d){const x=new Date(d.getFullYear(),d.getMonth(),d.getDate());const wd=(x.getDay()+6)%7;x.setDate(x.getDate()-wd);return x;}
-function chartBuckets(period){
-  const t=new Date();const list=[];
-  if(period==='day'){for(let i=29;i>=0;i--){const d=new Date(t.getFullYear(),t.getMonth(),t.getDate()-i);list.push({key:`${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`,label:`${d.getMonth()+1}/${d.getDate()}`});}}
-  else if(period==='week'){const m0=mondayOf(t);for(let i=11;i>=0;i--){const d=new Date(m0.getFullYear(),m0.getMonth(),m0.getDate()-i*7);list.push({key:`w${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`,label:`${d.getMonth()+1}/${d.getDate()}`});}}
-  else if(period==='month'){for(let i=11;i>=0;i--){let y=t.getFullYear(),m=t.getMonth()-i;while(m<0){m+=12;y--;}list.push({key:`${y}-${m+1}`,label:`${y}/${m+1}`});}}
-  else{for(let i=4;i>=0;i--){const y=t.getFullYear()-i;list.push({key:`${y}`,label:`${y}`});}}
+function parseYMD(s){const p=s.split('-').map(n=>parseInt(n,10));return new Date(p[0],p[1]-1,p[2]);}
+function timeBuckets(from,to,period){
+  const list=[];let cur;
+  if(period==='day'){cur=new Date(from.getFullYear(),from.getMonth(),from.getDate());while(cur<=to){list.push({key:`${cur.getFullYear()}-${cur.getMonth()+1}-${cur.getDate()}`,label:`${cur.getMonth()+1}/${cur.getDate()}`});cur=new Date(cur.getFullYear(),cur.getMonth(),cur.getDate()+1);}}
+  else if(period==='week'){cur=mondayOf(from);while(cur<=to){list.push({key:`w${cur.getFullYear()}-${cur.getMonth()+1}-${cur.getDate()}`,label:`${cur.getMonth()+1}/${cur.getDate()}`});cur=new Date(cur.getFullYear(),cur.getMonth(),cur.getDate()+7);}}
+  else if(period==='month'){cur=new Date(from.getFullYear(),from.getMonth(),1);const end=new Date(to.getFullYear(),to.getMonth(),1);while(cur<=end){list.push({key:`${cur.getFullYear()}-${cur.getMonth()+1}`,label:`${cur.getFullYear()}/${cur.getMonth()+1}`});cur=new Date(cur.getFullYear(),cur.getMonth()+1,1);}}
+  else{for(let y=from.getFullYear();y<=to.getFullYear();y++)list.push({key:`${y}`,label:`${y}`});}
+  if(list.length>366)list.splice(0,list.length-366);
   return list;
 }
 function bucketKeyOf(period,y,m,d){
@@ -410,28 +437,83 @@ async function loadCharts(){
   const metric=chartMetric;const field=LIVE_FIELDS.find(f=>f.key===metric)||LIVE_FIELDS[0];
   const isSum=LIVE_SUM_KEYS.has(metric);
   const rids=chartRoom==='all'?Object.keys(rooms):[chartRoom];
-  const buckets=chartBuckets(chartPeriod);const idx={};buckets.forEach((b,i)=>idx[b.key]=i);
-  const sum=new Array(buckets.length).fill(0),cnt=new Array(buckets.length).fill(0);
+  const from=chartFrom?parseYMD(chartFrom):new Date(Date.now()-29*864e5);from.setHours(0,0,0,0);
+  const to=chartTo?parseYMD(chartTo):new Date();to.setHours(23,59,59,999);
+  const recs=[];
   for(const rid of rids){
     const stats=await DB.get(`rooms/${rid}/liveStats`);if(!stats)continue;
-    entriesOf(stats).forEach(([yStr,yObj])=>{const y=parseInt(yStr,10);entriesOf(yObj).forEach(([mStr,mObj])=>{const m=parseInt(mStr,10);entriesOf(mObj).forEach(([dStr,dObj])=>{const d=parseInt(dStr,10);entriesOf(dObj).forEach(([,rec])=>{
-      if(!rec)return;const v=rec[metric];if(v==null||isNaN(v))return;const i=idx[bucketKeyOf(chartPeriod,y,m,d)];if(i==null)return;sum[i]+=Number(v);cnt[i]++;
-    });});});});
+    entriesOf(stats).forEach(([yS,yO])=>{const y=parseInt(yS,10);entriesOf(yO).forEach(([mS,mO])=>{const m=parseInt(mS,10);entriesOf(mO).forEach(([dS,dO])=>{const d=parseInt(dS,10);const dt=new Date(y,m-1,d);if(dt<from||dt>to)return;entriesOf(dO).forEach(([,rec])=>{if(!rec)return;const v=rec[metric];if(v==null||isNaN(v))return;recs.push({y,m,d,slot:rec.slot!=null?rec.slot:null,v:Number(v)});});});});});
   }
-  const data=buckets.map((b,i)=>isSum?sum[i]:(cnt[i]?sum[i]/cnt[i]:0));
+  let filtered=recs;
+  if(chartSlot&&chartSlot!=='__by')filtered=recs.filter(r=>String(r.slot)===String(chartSlot));
+  let labels,data,cnt;
+  if(chartSlot==='__by'){
+    const map={};filtered.forEach(r=>{const k=r.slot!=null?r.slot:'未指定';(map[k]=map[k]||{s:0,c:0});map[k].s+=r.v;map[k].c++;});
+    const keys=Object.keys(map).sort((a,b)=>a==='未指定'?1:b==='未指定'?-1:a-b);
+    labels=keys.map(k=>k==='未指定'?'未指定':`${k}班`);cnt=keys.map(k=>map[k].c);
+    data=keys.map(k=>isSum?map[k].s:(map[k].c?map[k].s/map[k].c:0));
+  }else{
+    const buckets=timeBuckets(from,to,chartPeriod);const idx={};buckets.forEach((b,i)=>idx[b.key]=i);
+    const s=new Array(buckets.length).fill(0),c=new Array(buckets.length).fill(0);
+    filtered.forEach(r=>{const i=idx[bucketKeyOf(chartPeriod,r.y,r.m,r.d)];if(i==null)return;s[i]+=r.v;c[i]++;});
+    labels=buckets.map(b=>b.label);cnt=c;data=buckets.map((b,i)=>isSum?s[i]:(c[i]?s[i]/c[i]:0));
+  }
   const totalSessions=cnt.reduce((a,b)=>a+b,0);
   let agg;if(isSum)agg=data.reduce((a,b)=>a+b,0);else{const nz=data.filter((v,i)=>cnt[i]>0);agg=nz.length?nz.reduce((a,b)=>a+b,0)/nz.length:0;}
   $('chart-kpi').innerHTML=`<div class="kpi-card"><div class="num">${fmtChartNum(agg)}</div><div class="lbl">${isSum?'区间合计':'区间平均'}·${esc(field.label)}${field.unit?`(${esc(field.unit)})`:''}</div></div><div class="kpi-card"><div class="num">${totalSessions}</div><div class="lbl">场次数</div></div>`;
-  $('chart-note').textContent=`${chartRoom==='all'?'全部直播间':((rooms[chartRoom]||{}).name||chartRoom)} · ${CHART_RANGE_LABEL[chartPeriod]} · ${isSum?'各时段合计（求和）':'各时段平均'}`;
-  drawChart(buckets.map(b=>b.label),data,field,isSum);
+  const roomName=chartRoom==='all'?'全部直播间':((rooms[chartRoom]||{}).name||chartRoom);
+  const dimTxt=chartSlot==='__by'?'班别对比':(chartSlot?`仅${chartSlot}班`:'全部班');
+  $('chart-note').textContent=`${roomName} · ${chartFrom||fmtD(from)}〜${chartTo||fmtD(to)} · ${chartSlot==='__by'?'按班':CHART_GRAN_LABEL[chartPeriod]} · ${isSum?'合计':'平均'} · ${dimTxt}`;
+  drawChart(labels,data,field,isSum||chartSlot==='__by');
+  const sb={};recs.forEach(r=>{const k=r.slot!=null?r.slot:'未指定';(sb[k]=sb[k]||{s:0,c:0});sb[k].s+=r.v;sb[k].c++;});
+  const slotBreakdown=Object.keys(sb).sort((a,b)=>a==='未指定'?1:b==='未指定'?-1:a-b).map(k=>({slot:k,total:sb[k].s,avg:sb[k].c?sb[k].s/sb[k].c:0,cnt:sb[k].c}));
+  window.__chartCtx={roomName,metricLabel:field.label,unit:field.unit,isSum,rangeTxt:`${chartFrom||fmtD(from)}〜${chartTo||fmtD(to)}`,granLabel:chartSlot==='__by'?'按班':CHART_GRAN_LABEL[chartPeriod],timeSeries:labels.map((l,i)=>({label:l,val:data[i],cnt:cnt[i]})),slotBreakdown};
 }
-function drawChart(labels,data,field,isSum){
+function drawChart(labels,data,field,asBar){
   if(typeof Chart==='undefined'){$('chart-note').textContent='图表库加载失败（请检查网络后刷新）';return;}
   const ctx=$('chart-canvas').getContext('2d');if(chartInst)chartInst.destroy();
   const accent='#7fd1b9';
-  chartInst=new Chart(ctx,{type:isSum?'bar':'line',
-    data:{labels,datasets:[{label:field.label+(field.unit?`(${field.unit})`:''),data,backgroundColor:isSum?'rgba(127,209,185,0.55)':'rgba(127,209,185,0.15)',borderColor:accent,borderWidth:2,tension:0.25,pointRadius:isSum?0:3,fill:!isSum}]},
+  chartInst=new Chart(ctx,{type:asBar?'bar':'line',
+    data:{labels,datasets:[{label:field.label+(field.unit?`(${field.unit})`:''),data,backgroundColor:asBar?'rgba(127,209,185,0.55)':'rgba(127,209,185,0.15)',borderColor:accent,borderWidth:2,tension:0.25,pointRadius:asBar?0:3,fill:!asBar}]},
     options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#e6e8ec'}}},scales:{x:{ticks:{color:'#8a93a3',maxRotation:0,autoSkip:true},grid:{color:'rgba(255,255,255,0.05)'}},y:{beginAtZero:true,ticks:{color:'#8a93a3'},grid:{color:'rgba(255,255,255,0.06)'}}}}});
+}
+/* AI分析（Anthropic API・ユーザー自身のキーをlocalStorageに保存して直接呼び出し） */
+function mdToHtml(t){
+  const lines=String(t).split('\n');let out='',inList=false;
+  for(const raw of lines){
+    let line=esc(raw).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
+    const h=line.match(/^\s*#{1,6}\s+(.*)$/);const li=line.match(/^\s*[-*]\s+(.*)$/);
+    if(li){if(!inList){out+='<ul>';inList=true;}out+=`<li>${li[1]}</li>`;continue;}
+    if(inList){out+='</ul>';inList=false;}
+    if(h){out+=`<h3>${h[1]}</h3>`;}
+    else if(line.trim()==='')out+='<div style="height:6px"></div>';
+    else out+=`<div>${line}</div>`;
+  }
+  if(inList)out+='</ul>';
+  return out;
+}
+function buildAiSummary(c){
+  const rd=n=>Math.round(n*100)/100;
+  const ts=c.timeSeries.filter(p=>p.cnt>0).map(p=>`${p.label}:${rd(p.val)}(${p.cnt}场)`).join(', ')||'(データなし)';
+  const sb=c.slotBreakdown.map(s=>`${s.slot==='未指定'?'未指定':s.slot+'班'}: 合計${rd(s.total)} / 平均${rd(s.avg)} / ${s.cnt}场`).join('\n')||'(班データなし)';
+  return `直播间: ${c.roomName}\n指標: ${c.metricLabel}${c.unit?'('+c.unit+')':''} (${c.isSum?'合計系':'率系'})\n期間: ${c.rangeTxt} / 粒度: ${c.granLabel}\n\n時系列:\n${ts}\n\n班(シフト)別内訳:\n${sb}`;
+}
+async function runAiAnalysis(){
+  const box=$('chart-ai');box.style.display='block';
+  box.innerHTML='<div class="ai-box"><b>🤖 AI分析</b><div class="muted" style="margin-top:6px;">分析中…（数据将发送至 Anthropic API）</div></div>';
+  const ctx=window.__chartCtx;
+  if(!ctx){box.innerHTML='<div class="ai-box err">先にグラフを表示してください。</div>';return;}
+  let key=localStorage.getItem('pantera_ai_key');
+  if(!key){key=prompt('AI分析に使う Anthropic API キー（sk-ant-...）を入力。ブラウザのローカルにのみ保存されます。');if(!key){box.style.display='none';return;}key=key.trim();localStorage.setItem('pantera_ai_key',key);}
+  const p=`あなたは日本のライブコマース(抖音直播)の売上データ分析アシスタントです。以下のデータを分析し、必ず日本語で、Markdownの見出し(###)と箇条書きで簡潔に答えてください。\n観点：1) 全体の傾向、2) どの班(シフト時間帯)の売上・効率が良い/悪いか、3) 具体的な改善提案を3つ。数値を根拠として引用すること。\n\n【データ】\n${buildAiSummary(ctx)}`;
+  try{
+    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-sonnet-5',max_tokens:1200,messages:[{role:'user',content:p}]})});
+    if(!res.ok){const t=await res.text();throw new Error('API '+res.status+' '+t.slice(0,180));}
+    const j=await res.json();const text=(j.content&&j.content[0]&&j.content[0].text)||'(空の応答)';
+    box.innerHTML=`<div class="ai-box"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><b>🤖 AI分析</b><span class="muted" style="font-size:11px;">claude-sonnet-5</span><span style="flex:1"></span><button class="btn-s b-gray" onclick="localStorage.removeItem('pantera_ai_key');alert('已清除保存的API密钥');">更换密钥</button></div><div class="ai-md">${mdToHtml(text)}</div></div>`;
+  }catch(e){
+    box.innerHTML=`<div class="ai-box err">AI分析に失敗しました：${esc(String(e&&e.message||e))}<div style="margin-top:8px;"><button class="btn-s b-gray" onclick="localStorage.removeItem('pantera_ai_key');runAiAnalysis()">キーを再入力して再試行</button></div></div>`;
+  }
 }
 document.addEventListener('paste',e=>{
   if(!$('panel-livedata')||!$('panel-livedata').classList.contains('show'))return;
@@ -934,9 +1016,18 @@ function initLiveData(){
   const now=new Date();
   if(!$('ld-date').value)$('ld-date').value=`${now.getFullYear()}-${pad2(now.getMonth()+1)}-${pad2(now.getDate())}`;
   if(!$('ld-time').value)$('ld-time').value=`${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+  loadLdSlots(sel.value);
   resetLdForm();
   loadLdSessions();
 }
+async function loadLdSlots(rid,selected){
+  const s=$('ld-slot');if(!s)return;
+  const slots=await DB.get(`rooms/${rid}/slots`)||{};
+  const list=Object.values(slots).sort((a,b)=>(a.order||0)-(b.order||0));
+  s.innerHTML='<option value="">未指定班次</option>'+list.map(x=>`<option value="${x.order}">${x.order}班 ${esc(x.time||'')}</option>`).join('');
+  s.value=(selected!=null?String(selected):'');
+}
+function onLdRoomChange(){const rid=$('ld-room').value;loadLdSlots(rid);loadLdSessions();}
 function renderLdGrid(values,hits){
   values=values||{};hits=hits||{};
   $('ld-grid').innerHTML=LIVE_FIELDS.map(f=>{
@@ -1061,11 +1152,13 @@ async function saveLdSession(){
   const ts=new Date(y,m-1,d,hh||0,mm||0).getTime();
   const values=collectLdForm();
   if(!Object.keys(values).length){alert('请至少填写一项数据');return;}
+  const slot=($('ld-slot')&&$('ld-slot').value!=='')?parseInt($('ld-slot').value,10):null;
   const rec=Object.assign({ts,source:'ocr'},values);
+  if(slot!=null)rec.slot=slot;
   let key=ldEditKey&&ldEditKey.key;
   if(!key)key='k'+Date.now()+Math.random().toString(36).slice(2,6);
   await DB.set(`rooms/${rid}/liveStats/${y}/${m}/${d}/${key}`,rec);
-  await logEvent(rid,{action:'edit',target:`直播数据 ${y}/${m}/${d} ${timeStr}`,after:`GMV=${rec.gmv!=null?rec.gmv:'-'}`});
+  await logEvent(rid,{action:'edit',target:`直播数据 ${y}/${m}/${d} ${timeStr}${slot!=null?` ${slot}班`:''}`,after:`GMV=${rec.gmv!=null?rec.gmv:'-'}`});
   localStorage.setItem('ld_last_room',rid);
   resetLdForm();loadLdSessions();
   alert('已保存');
@@ -1085,7 +1178,7 @@ async function loadLdSessions(){
     const detail=LIVE_FIELDS.map(f=>r[f.key]!=null?`<span><b>${esc(f.label)}</b>：${r[f.key]}${f.unit}</span>`:'').filter(Boolean).join('');
     return `<div class="ld-sess" id="ld-sess-${r.key}">
       <div class="ld-sess-top" onclick="document.getElementById('ld-sess-${r.key}').classList.toggle('open')">
-        <span>${dtStr}</span><b>GMV ${r.gmv!=null?r.gmv:'-'}円</b><span class="muted">成交${r.orders!=null?r.orders:'-'}件 · 观看${r.viewersNow!=null?r.viewersNow:'-'}人 · 新增粉丝${r.newFollowers!=null?r.newFollowers:'-'}</span>
+        <span>${dtStr}${r.slot!=null?` <b style="color:var(--accent)">${r.slot}班</b>`:''}</span><b>GMV ${r.gmv!=null?r.gmv:'-'}円</b><span class="muted">成交${r.orders!=null?r.orders:'-'}件 · 观看${r.viewersNow!=null?r.viewersNow:'-'}人 · 新增粉丝${r.newFollowers!=null?r.newFollowers:'-'}</span>
         <span class="sp" style="flex:1"></span>
         <button class="btn-s b-gray" onclick="event.stopPropagation();editLdSession('${esc(r.rid)}',${r.y},${r.m},${r.day},'${esc(r.key)}')">编辑</button>
         <button class="btn-s b-red" onclick="event.stopPropagation();deleteLdSession('${esc(r.rid)}',${r.y},${r.m},${r.day},'${esc(r.key)}')">删除</button>
@@ -1099,6 +1192,7 @@ async function editLdSession(rid,y,m,day,key){
   $('ld-room').value=rid;
   $('ld-date').value=`${y}-${pad2(m)}-${pad2(day)}`;
   if(rec.ts){const dt=new Date(rec.ts);$('ld-time').value=`${pad2(dt.getHours())}:${pad2(dt.getMinutes())}`;}
+  await loadLdSlots(rid,rec.slot);
   ldEditKey={rid,y,m,d:day,key};
   $('ld-edit-tag').textContent=`正在编辑 ${y}/${m}/${day} 的场次记录`;
   renderLdGrid(rec,{});
