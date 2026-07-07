@@ -1155,6 +1155,21 @@ async function saveLdSession(){
   const slot=($('ld-slot')&&$('ld-slot').value!=='')?parseInt($('ld-slot').value,10):null;
   const rec=Object.assign({ts,source:'ocr'},values);
   if(slot!=null)rec.slot=slot;
+  /* 同じ日・同じ班に既存記録があれば「合算」オプション（同じ班を2回やって複数枚アップロードした時の合計対応）。編集中は対象外 */
+  if(!ldEditKey&&slot!=null){
+    const md=await DB.get(`rooms/${rid}/liveStats/${y}/${m}/${d}`)||{};
+    const exKey=Object.keys(md).find(k=>md[k]&&md[k].slot===slot);
+    if(exKey&&confirm(`${y}/${m}/${d} の ${slot}班 は既に登録済みです。\n数値を合算して1件にまとめますか？\n（GMV・件数などは加算、比率(%)は平均。OK＝合算／キャンセル＝別の场次として保存）`)){
+      const ex=md[exKey],merged=Object.assign({},ex);
+      LIVE_FIELDS.forEach(f=>{const a=ex[f.key],b=rec[f.key];if(a==null&&b==null)return;
+        if(LIVE_SUM_KEYS.has(f.key))merged[f.key]=(a||0)+(b||0);
+        else{const vs=[a,b].filter(v=>v!=null);merged[f.key]=vs.reduce((s,v)=>s+v,0)/vs.length;}});
+      merged.slot=slot;merged.ts=rec.ts||ex.ts;merged.source='ocr';merged.merged=(ex.merged||1)+1;
+      await DB.set(`rooms/${rid}/liveStats/${y}/${m}/${d}/${exKey}`,merged);
+      await logEvent(rid,{action:'edit',target:`直播数据合算 ${y}/${m}/${d} ${slot}班`,after:`GMV=${merged.gmv!=null?merged.gmv:'-'}`});
+      localStorage.setItem('ld_last_room',rid);resetLdForm();loadLdSessions();alert(`已合算（共${merged.merged}场）`);return;
+    }
+  }
   let key=ldEditKey&&ldEditKey.key;
   if(!key)key='k'+Date.now()+Math.random().toString(36).slice(2,6);
   await DB.set(`rooms/${rid}/liveStats/${y}/${m}/${d}/${key}`,rec);
@@ -1178,7 +1193,7 @@ async function loadLdSessions(){
     const detail=LIVE_FIELDS.map(f=>r[f.key]!=null?`<span><b>${esc(f.label)}</b>：${r[f.key]}${f.unit}</span>`:'').filter(Boolean).join('');
     return `<div class="ld-sess" id="ld-sess-${r.key}">
       <div class="ld-sess-top" onclick="document.getElementById('ld-sess-${r.key}').classList.toggle('open')">
-        <span>${dtStr}${r.slot!=null?` <b style="color:var(--accent)">${r.slot}班</b>`:''}</span><b>GMV ${r.gmv!=null?r.gmv:'-'}円</b><span class="muted">成交${r.orders!=null?r.orders:'-'}件 · 观看${r.viewersNow!=null?r.viewersNow:'-'}人 · 新增粉丝${r.newFollowers!=null?r.newFollowers:'-'}</span>
+        <span>${dtStr}${r.slot!=null?` <b style="color:var(--accent)">${r.slot}班</b>`:''}${r.merged>1?` <span class="muted">(合算${r.merged}场)</span>`:''}</span><b>GMV ${r.gmv!=null?r.gmv:'-'}円</b><span class="muted">成交${r.orders!=null?r.orders:'-'}件 · 观看${r.viewersNow!=null?r.viewersNow:'-'}人 · 新增粉丝${r.newFollowers!=null?r.newFollowers:'-'}</span>
         <span class="sp" style="flex:1"></span>
         <button class="btn-s b-gray" onclick="event.stopPropagation();editLdSession('${esc(r.rid)}',${r.y},${r.m},${r.day},'${esc(r.key)}')">编辑</button>
         <button class="btn-s b-red" onclick="event.stopPropagation();deleteLdSession('${esc(r.rid)}',${r.y},${r.m},${r.day},'${esc(r.key)}')">删除</button>
