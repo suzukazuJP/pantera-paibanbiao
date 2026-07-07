@@ -89,6 +89,10 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
 .ai-box.err{border-color:#b0413a;color:#e08a8a;}
 .ai-md h3{font-size:14px;color:var(--accent);margin:12px 0 5px;font-weight:700;}
 .ai-md ul{margin:5px 0 5px 18px;}.ai-md li{margin:3px 0;}.ai-md strong{color:var(--accent);}
+.ld-watch{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:14px;}
+.wq-card{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin-bottom:7px;}
+.wq-card.err{border-color:#b0413a;color:#e08a8a;}
+.wq-card input[type=date]{padding:3px 6px;font-size:12px;}
 .add-room{background:var(--panel);border:1px dashed var(--line);border-radius:10px;padding:14px;margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
 .late-dd{background:var(--panel2);border:1px solid var(--line);border-radius:6px;font-size:11px;padding:0;margin:0;list-style:none;min-width:200px;display:none;}
 .late-dd.open{display:block;}
@@ -250,6 +254,17 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
         <button class="btn-s b-gray" onclick="loadLdSessions()">刷新列表</button>
       </div>
       <div class="scroll" id="livedata-scroll">
+        <div class="ld-watch" id="ld-watch">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <b>📁 自动监视文件夹</b>
+            <button class="btn-s b-gray" id="lw-pick" onclick="pickWatchFolder()">选择监视文件夹</button>
+            <button class="btn-s b-gray" id="lw-stop" onclick="stopWatch()" style="display:none;">停止监视</button>
+            <label style="font-size:12px;display:inline-flex;align-items:center;gap:4px;cursor:pointer;color:var(--ink);"><input type="checkbox" id="lw-auto" onchange="toggleWatchAuto(this.checked)" style="width:auto;"> 全自动保存（无需确认）</label>
+            <span class="muted" id="lw-status">未监视</span>
+          </div>
+          <p class="muted" style="font-size:11px;margin-top:5px;line-height:1.6;">Chrome / Edge 限定。指定した共有(同期)フォルダに新しい截图が来ると自動でOCRします。<b>「全自动保存」ON</b>＝そのまま自動で入库（確認不要・班次は未指定、後で修改/删除可）。OFF＝下の「待确认队列」で核対して保存。<b>この画面をChromeで開いている間だけ</b>監視します。保存先は上の直播间セレクタの部屋。※OCRは一部誤読するため、全自動時は後でグラフ等で確認を。</p>
+          <div id="lw-queue"></div>
+        </div>
         <div class="ld-form">
           <div class="ld-drop" id="ld-drop" onclick="$('ld-file').click()">📷 点击选择「直播数据大屏」截图上传，或直接 Cmd+V / Ctrl+V 粘贴截图，自动识别其中的数据（识别后可核对/修改再保存）</div>
           <input type="file" id="ld-file" accept="image/*" style="display:none;" onchange="ldHandleFile(this.files[0])">
@@ -1017,6 +1032,7 @@ function initLiveData(){
   if(!$('ld-date').value)$('ld-date').value=`${now.getFullYear()}-${pad2(now.getMonth()+1)}-${pad2(now.getDate())}`;
   if(!$('ld-time').value)$('ld-time').value=`${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
   loadLdSlots(sel.value);
+  if($('lw-auto'))$('lw-auto').checked=watchAuto;
   resetLdForm();
   loadLdSessions();
 }
@@ -1101,42 +1117,137 @@ async function ocrRegion(srcImg,box,scale){
   const r=await Tesseract.recognize(blob,'eng');
   return (r.data.text||'').trim();
 }
+async function ocrLiveImage(file){
+  const origImg=await decodeImageFile(file);
+  const maxDim=2400;let w=origImg.naturalWidth,h=origImg.naturalHeight;
+  if(Math.max(w,h)>maxDim){const s=maxDim/Math.max(w,h);w=Math.round(w*s);h=Math.round(h*s);}
+  const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
+  const cx=canvas.getContext('2d');cx.drawImage(origImg,0,0,w,h);enhanceForOcr(cx,w,h);
+  const blob=await new Promise((res,rej)=>canvas.toBlob(b=>b?res(b):rej(new Error('压缩图片失败')),'image/png'));
+  const {data}=await Tesseract.recognize(blob,'chi_sim+eng');
+  const parsed=parseLiveStatsText(data.text);const hits={};Object.keys(parsed).forEach(k=>hits[k]=true);
+  const words=(data.words||[]).filter(wd=>wd.text&&wd.text.trim());const scale=origImg.naturalWidth/w;
+  const capsules=[{key:'orders',label:'成交件数'},{key:'viewersNow',label:'浏览人数'}];
+  for(const cap of capsules){
+    if(parsed[cap.key]!=null)continue;
+    const box=locateValueBoxAfterLabel(words,cap.label);if(!box)continue;
+    try{const txt=await ocrRegion(origImg,{x0:box.x0*scale,y0:box.y0*scale,x1:box.x1*scale,y1:box.y1*scale},5);const v=parseRescuedNum(txt);if(v!=null){parsed[cap.key]=v;hits[cap.key]=true;}}catch(e){}
+  }
+  return {parsed,hits,rawText:data.text||''};
+}
 async function ldHandleFile(file){
   if(!file)return;
-  const st=$('ld-status');st.className='ld-status busy';st.textContent='正在压缩图片…';
+  const st=$('ld-status');st.className='ld-status busy';st.textContent='识别中…（首次使用需下载识别引擎，可能需要几十秒）';
   try{
-    const origImg=await decodeImageFile(file);
-    const maxDim=2400;
-    let w=origImg.naturalWidth,h=origImg.naturalHeight;
-    if(Math.max(w,h)>maxDim){const s=maxDim/Math.max(w,h);w=Math.round(w*s);h=Math.round(h*s);}
-    const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
-    const cx=canvas.getContext('2d');cx.drawImage(origImg,0,0,w,h);
-    enhanceForOcr(cx,w,h);
-    const blob=await new Promise((res,rej)=>canvas.toBlob(b=>b?res(b):rej(new Error('压缩图片失败')),'image/png'));
-    st.textContent='识别中…（首次使用需下载识别引擎，可能需要几十秒）';
-    const {data}=await Tesseract.recognize(blob,'chi_sim+eng');
-    $('ld-raw-wrap').style.display='block';$('ld-raw-text').value=data.text||'';
-    const parsed=parseLiveStatsText(data.text);
-    const hits={};Object.keys(parsed).forEach(k=>hits[k]=true);
-    /* 上部胶囊の数字が壊れて未取得のとき、その领域だけ切り出して拡大再認識で救済 */
-    const words=(data.words||[]).filter(wd=>wd.text&&wd.text.trim());
-    const scale=origImg.naturalWidth/w;
-    const capsules=[{key:'orders',label:'成交件数'},{key:'viewersNow',label:'浏览人数'}];
-    for(const cap of capsules){
-      if(parsed[cap.key]!=null)continue;
-      const box=locateValueBoxAfterLabel(words,cap.label);if(!box)continue;
-      try{
-        const txt=await ocrRegion(origImg,{x0:box.x0*scale,y0:box.y0*scale,x1:box.x1*scale,y1:box.y1*scale},5);
-        const v=parseRescuedNum(txt);
-        if(v!=null){parsed[cap.key]=v;hits[cap.key]=true;}
-      }catch(e){}
-    }
+    const {parsed,hits,rawText}=await ocrLiveImage(file);
+    $('ld-raw-wrap').style.display='block';$('ld-raw-text').value=rawText;
     renderLdGrid(parsed,hits);
     const n=Object.keys(parsed).length;
     st.className='ld-status';st.textContent=n?`已自动识别 ${n}/${LIVE_FIELDS.length} 项，请核对后保存（未识别到的项请手动填写）。`:'未能自动识别出数据，请手动填写。';
   }catch(e){
     st.className='ld-status err';st.textContent='识别失败：'+(e&&e.message||e);
   }
+}
+/* ===== 自动监视文件夹（Chrome/Edge の File System Access API・此页保持打开时に監視） ===== */
+let watchHandle=null,watchTimer=null,watchProcessed=new Set(),watchQueue=[],watchPolling=false,watchAuto=localStorage.getItem('pantera_watch_auto')==='1';
+function watchSupported(){return 'showDirectoryPicker' in window;}
+async function pickWatchFolder(){
+  if(!watchSupported()){alert('此功能需要 Chrome 或 Edge 浏览器（Safari 不支持文件夹监视）。');return;}
+  try{const h=await window.showDirectoryPicker({mode:'read'});watchHandle=h;startWatch();}catch(e){}
+}
+function startWatch(){
+  if(!watchHandle)return;
+  const pk=$('lw-pick'),sp=$('lw-stop');if(pk)pk.style.display='none';if(sp)sp.style.display='';
+  const rn=(rooms[$('ld-room').value]||{}).name||$('ld-room').value||'';
+  $('lw-status').textContent=`监视中：${watchHandle.name} → ${rn}`;
+  if(watchTimer)clearInterval(watchTimer);
+  pollWatchFolder();watchTimer=setInterval(pollWatchFolder,6000);
+}
+function stopWatch(){if(watchTimer)clearInterval(watchTimer);watchTimer=null;const pk=$('lw-pick'),sp=$('lw-stop');if(pk)pk.style.display='';if(sp)sp.style.display='none';$('lw-status').textContent='已停止监视';}
+async function pollWatchFolder(){
+  if(!watchHandle||watchPolling)return;watchPolling=true;
+  try{
+    const perm=await watchHandle.queryPermission({mode:'read'});
+    if(perm!=='granted'){$('lw-status').textContent='授权已失效，请重新「选择监视文件夹」';watchPolling=false;return;}
+    const found=[];
+    for await(const [name,handle] of watchHandle.entries()){
+      if(handle.kind!=='file'||!/\.(png|jpe?g|webp)$/i.test(name)||watchProcessed.has(name))continue;
+      found.push([name,handle]);
+    }
+    for(const [name,handle] of found){watchProcessed.add(name);const file=await handle.getFile();await addToWatchQueue(file,name);}
+  }catch(e){$('lw-status').textContent='监视出错：'+(e.message||e);}
+  watchPolling=false;
+}
+async function saveWatchedRecord(rid,y,m,d,parsed){
+  const values={};LIVE_FIELDS.forEach(f=>{if(parsed&&parsed[f.key]!=null)values[f.key]=parsed[f.key];});
+  if(!Object.keys(values).length)throw new Error('未识别到数值');
+  const rec=Object.assign({ts:new Date(y,m-1,d,0,0).getTime(),source:'ocr-auto'},values);
+  const key='k'+Date.now()+Math.random().toString(36).slice(2,6);
+  await DB.set(`rooms/${rid}/liveStats/${y}/${m}/${d}/${key}`,rec);
+  await logEvent(rid,{action:'edit',target:`直播数据(自动监视${watchAuto?'·全自动':''}) ${y}/${m}/${d}`,after:`GMV=${rec.gmv!=null?rec.gmv:'-'}`});
+  return {y,m,d,key};
+}
+async function addToWatchQueue(file,name){
+  const id='wq'+Date.now()+Math.random().toString(36).slice(2,5);
+  const d0=new Date(file.lastModified||Date.now());
+  const item={id,name,rid:$('ld-room').value,mtime:file.lastModified||Date.now(),parsed:null,busy:true,error:null,saved:null};
+  watchQueue.unshift(item);renderWatchQueue();
+  try{const {parsed}=await ocrLiveImage(file);item.parsed=parsed;}catch(e){item.error=String(e&&e.message||e);}
+  item.busy=false;
+  if(!item.error&&watchAuto){
+    try{item.saved=await saveWatchedRecord(item.rid,d0.getFullYear(),d0.getMonth()+1,d0.getDate(),item.parsed);loadLdSessions();}
+    catch(e){item.error='自动保存失败：'+(e&&e.message||e);}
+  }
+  renderWatchQueue();
+}
+function renderWatchQueue(){
+  const box=$('lw-queue');if(!box)return;
+  if(!watchQueue.length){box.innerHTML='';return;}
+  const head=watchAuto?'自动保存记录（'+watchQueue.length+'）— 已自动入库，如有误可修改/删除':'待确认队列（'+watchQueue.length+'）— 核对数值后一键保存（班次默认未指定）';
+  box.innerHTML='<div class="dash-h" style="margin:10px 0 6px;">'+head+'</div>'+watchQueue.map(it=>{
+    const d=new Date(it.mtime);const ds=`${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+    if(it.busy)return `<div class="wq-card"><b>${esc(it.name)}</b> <span class="muted">识别中…</span></div>`;
+    if(it.error)return `<div class="wq-card err"><b>${esc(it.name)}</b>：${esc(it.error)} <button class="btn-s b-gray" style="margin-left:8px" onclick="dropQueueItem('${it.id}')">删除</button></div>`;
+    const vals=LIVE_FIELDS.filter(f=>it.parsed[f.key]!=null).map(f=>`${esc(f.label)}:<b>${it.parsed[f.key]}</b>${f.unit}`).join(' · ')||'(未识别到数值)';
+    if(it.saved){const s=it.saved;return `<div class="wq-card">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <span style="color:var(--accent);font-weight:700;">✓ 已自动保存</span><b>${esc(it.name)}</b>
+        <span class="muted" style="font-size:11px;">${s.y}/${s.m}/${s.d}</span>
+        <span style="flex:1"></span>
+        <button class="btn-s b-gray" onclick="editSavedItem('${it.id}')">✎ 修改</button>
+        <button class="btn-s b-red" onclick="deleteSavedItem('${it.id}')">删除记录</button>
+      </div>
+      <div class="muted" style="font-size:12px;margin-top:5px;line-height:1.6;">${vals}</div>
+    </div>`;}
+    return `<div class="wq-card">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <b>${esc(it.name)}</b>
+        <label class="muted" style="font-size:11px;">日期 <input type="date" id="wqd-${it.id}" value="${ds}"></label>
+        <span style="flex:1"></span>
+        <button class="btn-s b-blue" onclick="confirmQueueItem('${it.id}')">✓ 确定保存</button>
+        <button class="btn-s b-gray" onclick="editQueueItem('${it.id}')">✎ 编辑</button>
+        <button class="btn-s b-red" onclick="dropQueueItem('${it.id}')">✕</button>
+      </div>
+      <div class="muted" style="font-size:12px;margin-top:5px;line-height:1.6;">${vals}</div>
+    </div>`;
+  }).join('');
+}
+function dropQueueItem(id){watchQueue=watchQueue.filter(x=>x.id!==id);renderWatchQueue();}
+function toggleWatchAuto(on){watchAuto=!!on;localStorage.setItem('pantera_watch_auto',watchAuto?'1':'0');if($('lw-auto'))$('lw-auto').checked=watchAuto;renderWatchQueue();}
+function editQueueItem(id){const it=watchQueue.find(x=>x.id===id);if(!it)return;
+  if(rooms[it.rid])$('ld-room').value=it.rid;loadLdSlots(it.rid);
+  const dv=$('wqd-'+id);if(dv)$('ld-date').value=dv.value;$('ld-time').value='';$('ld-slot').value='';
+  ldEditKey=null;renderLdGrid(it.parsed||{},{});$('ld-edit-tag').textContent='从监视队列载入（核对后按「保存本场数据」确定）';
+  dropQueueItem(id);$('livedata-scroll').scrollTop=0;
+}
+function editSavedItem(id){const it=watchQueue.find(x=>x.id===id);if(!it||!it.saved)return;const s=it.saved;editLdSession(it.rid,s.y,s.m,s.d,s.key);dropQueueItem(id);}
+async function deleteSavedItem(id){const it=watchQueue.find(x=>x.id===id);if(!it||!it.saved)return;if(!confirm('删除这条自动保存的记录？'))return;const s=it.saved;await DB.remove(`rooms/${it.rid}/liveStats/${s.y}/${s.m}/${s.d}/${s.key}`);dropQueueItem(id);loadLdSessions();}
+async function confirmQueueItem(id){
+  const it=watchQueue.find(x=>x.id===id);if(!it)return;
+  const dv=$('wqd-'+id);const ds=dv?dv.value:'';if(!ds){alert('请选择日期');return;}
+  const [y,m,d]=ds.split('-').map(x=>parseInt(x,10));
+  try{it.saved=await saveWatchedRecord(it.rid,y,m,d,it.parsed);}catch(e){alert(e&&e.message||'保存失败');return;}
+  dropQueueItem(id);loadLdSessions();
 }
 function collectLdForm(){
   const v={};
