@@ -93,6 +93,8 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
 .wq-card{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;margin-bottom:7px;}
 .wq-card.err{border-color:#b0413a;color:#e08a8a;}
 .wq-card input[type=date]{padding:3px 6px;font-size:12px;}
+.lw-drop{margin-top:8px;border:1.5px dashed var(--line);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--dim);cursor:pointer;text-align:center;}
+.lw-drop:hover,.lw-drop.drag{border-color:var(--accent);color:var(--ink);}
 .add-room{background:var(--panel);border:1px dashed var(--line);border-radius:10px;padding:14px;margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
 .late-dd{background:var(--panel2);border:1px solid var(--line);border-radius:6px;font-size:11px;padding:0;margin:0;list-style:none;min-width:200px;display:none;}
 .late-dd.open{display:block;}
@@ -263,6 +265,8 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
             <span class="muted" id="lw-status">未监视</span>
           </div>
           <p class="muted" style="font-size:11px;margin-top:5px;line-height:1.6;">Chrome / Edge 限定。指定した共有(同期)フォルダに新しい截图が来ると自動でOCRします。<b>「全自动保存」ON</b>＝そのまま自動で入库（確認不要・班次は未指定、後で修改/删除可）。OFF＝下の「待确认队列」で核対して保存。<b>この画面をChromeで開いている間だけ</b>監視します。保存先は上の直播间セレクタの部屋。※OCRは一部誤読するため、全自動時は後でグラフ等で確認を。</p>
+          <div class="lw-drop" id="lw-drop" onclick="$('lw-file').click()" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')" ondrop="lwDrop(event)">➕ 手动添加图片：点击选择文件 ・ 拖入图片 ・ 或直接 Cmd+V / Ctrl+V 粘贴（フォルダを使わず直接入れられます。同じ自動処理に流れます）</div>
+          <input type="file" id="lw-file" accept="image/*" multiple style="display:none;" onchange="manualAddImages(this.files)">
           <div id="lw-queue"></div>
         </div>
         <div class="ld-form">
@@ -536,7 +540,7 @@ document.addEventListener('paste',e=>{
   for(const item of items){
     if(item.type&&item.type.startsWith('image/')){
       const file=item.getAsFile();
-      if(file){e.preventDefault();ldHandleFile(file);}
+      if(file){e.preventDefault();manualAddImages([file]);}
       break;
     }
   }
@@ -1187,6 +1191,15 @@ async function saveWatchedRecord(rid,y,m,d,parsed){
   await logEvent(rid,{action:'edit',target:`直播数据(自动监视${watchAuto?'·全自动':''}) ${y}/${m}/${d}`,after:`GMV=${rec.gmv!=null?rec.gmv:'-'}`});
   return {y,m,d,key};
 }
+function manualAddImages(fileList){
+  const files=[...(fileList||[])].filter(f=>f&&f.type&&f.type.startsWith('image/'));
+  if(!files.length)return;
+  if(!$('ld-room').value){alert('请先在上方选择直播间');return;}
+  files.forEach(f=>addToWatchQueue(f,f.name||('粘贴图片_'+new Date().toLocaleTimeString()+'.png')));
+  const inp=$('lw-file');if(inp)inp.value='';
+  $('livedata-scroll').scrollTop=0;
+}
+function lwDrop(e){e.preventDefault();e.currentTarget.classList.remove('drag');const fs=e.dataTransfer&&e.dataTransfer.files;if(fs&&fs.length)manualAddImages(fs);}
 async function addToWatchQueue(file,name){
   const id='wq'+Date.now()+Math.random().toString(36).slice(2,5);
   const d0=new Date(file.lastModified||Date.now());
