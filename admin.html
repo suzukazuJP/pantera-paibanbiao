@@ -302,6 +302,7 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
         <button class="btn-s pd-tab" data-pd="month" onclick="setChartPeriod('month')">月</button>
         <button class="btn-s pd-tab" data-pd="year" onclick="setChartPeriod('year')">年</button>
         <span style="flex:1"></span>
+        <label style="font-size:12px;display:inline-flex;align-items:center;gap:4px;cursor:pointer;color:var(--ink);"><input type="checkbox" id="ai-auto" onchange="toggleAiAuto(this.checked)" style="width:auto;"> 🔄 自动</label>
         <button class="btn-s b-blue" onclick="runAiAnalysis()">🤖 AI分析</button>
       </div>
       <div class="scroll">
@@ -421,6 +422,7 @@ function initCharts(){
   if(!chartFrom)chartFrom=fmtD(new Date(Date.now()-29*864e5));
   $('chart-from').value=chartFrom;$('chart-to').value=chartTo;
   document.querySelectorAll('.pd-tab').forEach(b=>b.classList.toggle('on',b.dataset.pd===chartPeriod));
+  if($('ai-auto'))$('ai-auto').checked=aiAuto;
   populateChartSlots();
   loadCharts();
 }
@@ -487,6 +489,7 @@ async function loadCharts(){
   const sb={};recs.forEach(r=>{const k=r.slot!=null?r.slot:'未指定';(sb[k]=sb[k]||{s:0,c:0});sb[k].s+=r.v;sb[k].c++;});
   const slotBreakdown=Object.keys(sb).sort((a,b)=>a==='未指定'?1:b==='未指定'?-1:a-b).map(k=>({slot:k,total:sb[k].s,avg:sb[k].c?sb[k].s/sb[k].c:0,cnt:sb[k].c}));
   window.__chartCtx={roomName,metricLabel:field.label,unit:field.unit,isSum,rangeTxt:`${chartFrom||fmtD(from)}〜${chartTo||fmtD(to)}`,granLabel:chartSlot==='__by'?'按班':CHART_GRAN_LABEL[chartPeriod],timeSeries:labels.map((l,i)=>({label:l,val:data[i],cnt:cnt[i]})),slotBreakdown};
+  if(aiAuto)scheduleAutoAi();
 }
 function drawChart(labels,data,field,asBar){
   if(typeof Chart==='undefined'){$('chart-note').textContent='图表库加载失败（请检查网络后刷新）';return;}
@@ -517,22 +520,47 @@ function buildAiSummary(c){
   const sb=c.slotBreakdown.map(s=>`${s.slot==='未指定'?'未指定':s.slot+'班'}: 合計${rd(s.total)} / 平均${rd(s.avg)} / ${s.cnt}场`).join('\n')||'(班データなし)';
   return `直播间: ${c.roomName}\n指標: ${c.metricLabel}${c.unit?'('+c.unit+')':''} (${c.isSum?'合計系':'率系'})\n期間: ${c.rangeTxt} / 粒度: ${c.granLabel}\n\n時系列:\n${ts}\n\n班(シフト)別内訳:\n${sb}`;
 }
-async function runAiAnalysis(){
-  const box=$('chart-ai');box.style.display='block';
-  box.innerHTML='<div class="ai-box"><b>🤖 AI分析</b><div class="muted" style="margin-top:6px;">分析中…（数据将发送至 Anthropic API）</div></div>';
+let aiAuto=localStorage.getItem('pantera_ai_auto')==='1',aiBusy=false,aiPending=false,aiAutoTimer=null;
+function toggleAiAuto(on){
+  aiAuto=!!on;localStorage.setItem('pantera_ai_auto',aiAuto?'1':'0');
+  if($('ai-auto'))$('ai-auto').checked=aiAuto;
+  if(aiAuto)scheduleAutoAi();else if(aiAutoTimer){clearTimeout(aiAutoTimer);aiAutoTimer=null;}
+}
+function scheduleAutoAi(){
+  if(!aiAuto)return;
+  if(aiAutoTimer)clearTimeout(aiAutoTimer);
+  aiAutoTimer=setTimeout(()=>{if(aiAuto)runAiAnalysis({auto:true});},1300);
+}
+async function runAiAnalysis(opts){
+  opts=opts||{};const auto=!!opts.auto;
+  const box=$('chart-ai');if(!box)return;
   const ctx=window.__chartCtx;
-  if(!ctx){box.innerHTML='<div class="ai-box err">先にグラフを表示してください。</div>';return;}
+  if(!ctx){if(!auto){box.style.display='block';box.innerHTML='<div class="ai-box err">先にグラフを表示してください。</div>';}return;}
   let key=localStorage.getItem('pantera_ai_key');
-  if(!key){key=prompt('AI分析に使う Anthropic API キー（sk-ant-...）を入力。ブラウザのローカルにのみ保存されます。');if(!key){box.style.display='none';return;}key=key.trim();localStorage.setItem('pantera_ai_key',key);}
+  if(!key){
+    key=prompt('AI分析に使う Anthropic API キー（sk-ant-...）を入力。ブラウザのローカルにのみ保存されます。');
+    if(!key){if(auto)toggleAiAuto(false);else box.style.display='none';return;}
+    key=key.trim();localStorage.setItem('pantera_ai_key',key);
+  }
+  if(aiBusy){aiPending=true;return;}
+  aiBusy=true;
+  box.style.display='block';
+  const prev=box.querySelector('.ai-md');
+  if(prev){const u=document.createElement('div');u.className='ai-updating muted';u.style.cssText='font-size:11px;margin-bottom:6px;';u.textContent='🔄 更新中…';const aibox=box.querySelector('.ai-box');if(aibox)aibox.insertBefore(u,aibox.firstChild);}
+  else box.innerHTML='<div class="ai-box"><b>🤖 AI分析</b><div class="muted" style="margin-top:6px;">分析中…（数据将发送至 Anthropic API）</div></div>';
   const p=`あなたは日本のライブコマース(抖音直播)の売上データ分析アシスタントです。以下のデータを分析し、必ず日本語で、Markdownの見出し(###)と箇条書きで簡潔に答えてください。\n観点：1) 全体の傾向、2) どの班(シフト時間帯)の売上・効率が良い/悪いか、3) 具体的な改善提案を3つ。数値を根拠として引用すること。\n\n【データ】\n${buildAiSummary(ctx)}`;
   try{
     const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-sonnet-5',max_tokens:1200,messages:[{role:'user',content:p}]})});
     if(!res.ok){const t=await res.text();throw new Error('API '+res.status+' '+t.slice(0,180));}
     const j=await res.json();const text=(j.content&&j.content[0]&&j.content[0].text)||'(空の応答)';
-    box.innerHTML=`<div class="ai-box"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><b>🤖 AI分析</b><span class="muted" style="font-size:11px;">claude-sonnet-5</span><span style="flex:1"></span><button class="btn-s b-gray" onclick="localStorage.removeItem('pantera_ai_key');alert('已清除保存的API密钥');">更换密钥</button></div><div class="ai-md">${mdToHtml(text)}</div></div>`;
+    const ts=new Date().toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    box.innerHTML=`<div class="ai-box"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;"><b>🤖 AI分析</b>${aiAuto?'<span class="muted" style="font-size:11px;color:var(--accent);">● 自动更新</span>':''}<span class="muted" style="font-size:11px;">claude-sonnet-5 · 更新 ${ts}</span><span style="flex:1"></span><button class="btn-s b-gray" onclick="localStorage.removeItem('pantera_ai_key');alert('已清除保存的API密钥');">更换密钥</button></div><div class="ai-md">${mdToHtml(text)}</div></div>`;
   }catch(e){
-    box.innerHTML=`<div class="ai-box err">AI分析に失敗しました：${esc(String(e&&e.message||e))}<div style="margin-top:8px;"><button class="btn-s b-gray" onclick="localStorage.removeItem('pantera_ai_key');runAiAnalysis()">キーを再入力して再試行</button></div></div>`;
+    if(auto&&prev){const u=box.querySelector('.ai-updating');if(u){u.style.color='#e08a8a';u.textContent='⚠️ 更新失败（保留上次结果）：'+String(e&&e.message||e);}}
+    else box.innerHTML=`<div class="ai-box err">AI分析に失敗しました：${esc(String(e&&e.message||e))}<div style="margin-top:8px;"><button class="btn-s b-gray" onclick="localStorage.removeItem('pantera_ai_key');runAiAnalysis()">キーを再入力して再試行</button></div></div>`;
   }
+  aiBusy=false;
+  if(aiPending){aiPending=false;if(aiAuto)scheduleAutoAi();}
 }
 document.addEventListener('paste',e=>{
   if(!$('panel-livedata')||!$('panel-livedata').classList.contains('show'))return;
