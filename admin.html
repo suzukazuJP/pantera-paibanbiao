@@ -303,7 +303,7 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
         <button class="btn-s pd-tab" data-pd="year" onclick="setChartPeriod('year')">年</button>
         <span style="flex:1"></span>
         <label style="font-size:12px;display:inline-flex;align-items:center;gap:4px;cursor:pointer;color:var(--ink);"><input type="checkbox" id="ai-auto" onchange="toggleAiAuto(this.checked)" style="width:auto;"> 🔄 自动</label>
-        <button class="btn-s b-blue" onclick="runAiAnalysis()">🤖 AI分析</button>
+        <button class="btn-s b-blue" onclick="runAiAnalysis()">📊 分析する</button>
       </div>
       <div class="scroll">
         <div id="chart-kpi" class="kpi-row"></div>
@@ -529,38 +529,62 @@ function toggleAiAuto(on){
 function scheduleAutoAi(){
   if(!aiAuto)return;
   if(aiAutoTimer)clearTimeout(aiAutoTimer);
-  aiAutoTimer=setTimeout(()=>{if(aiAuto)runAiAnalysis({auto:true});},1300);
+  aiAutoTimer=setTimeout(()=>{if(aiAuto)runAiAnalysis({auto:true});},250);
 }
-async function runAiAnalysis(opts){
-  opts=opts||{};const auto=!!opts.auto;
-  const box=$('chart-ai');if(!box)return;
+function fmtLocalNum(n){if(n==null||isNaN(n))return '-';if(Math.abs(n)>=1000)return Math.round(n).toLocaleString();return String(Math.round(n*100)/100);}
+/* 内蔵の自動分析（外部API・キー不要・无料。数値からルールベースで示唆を生成） */
+function buildLocalAnalysis(c){
+  const u=c.unit?c.unit:'';const active=c.timeSeries.filter(p=>p.cnt>0);
+  const sessions=c.timeSeries.reduce((s,p)=>s+(p.cnt||0),0);
+  const realSlots=(c.slotBreakdown||[]).filter(s=>s.slot!=='未指定');
+  if(!active.length&&!realSlots.length&&!sessions)return '### データなし\n- この条件では保存済みデータがありません。期間・直播间・班次の条件を変えてみてください。';
+  const out=[];let trendDir=null;
+  out.push('### 全体傾向');
+  out.push(`- ${c.roomName} · ${c.rangeTxt} · ${c.granLabel} · **${c.metricLabel}**`);
+  const vals=active.map(p=>p.val);const total=vals.reduce((a,b)=>a+b,0);
+  const overall=c.isSum?total:(vals.length?total/vals.length:0);
+  out.push(`- ${c.isSum?'区间合计':'区间平均'}：**${fmtLocalNum(overall)}${u}**（${sessions}场・データのある区间 ${active.length}）`);
+  if(active.length){let pk=active[0];active.forEach(p=>{if(p.val>pk.val)pk=p;});out.push(`- ピークは **${pk.label}** の ${fmtLocalNum(pk.val)}${u}`);}
+  if(active.length>=2&&c.granLabel!=='按班'){
+    const half=Math.max(1,Math.floor(active.length/2));
+    const fA=active.slice(0,half).reduce((a,p)=>a+p.val,0)/half;
+    const lA=active.slice(-half).reduce((a,p)=>a+p.val,0)/half;
+    const diff=fA?(lA-fA)/Math.abs(fA)*100:0;
+    trendDir=diff>10?'上昇':diff<-10?'下降':'横ばい';
+    out.push(`- 直近の傾向：**${trendDir}**（前半平均 ${fmtLocalNum(fA)} → 後半平均 ${fmtLocalNum(lA)}${u}${Math.abs(diff)>=1?`, ${diff>0?'+':''}${Math.round(diff)}%`:''}）`);
+  }
+  out.push('### 班別（シフト時間帯）');
+  const keyOf=s=>c.isSum?s.total:s.avg;
+  const unknown=(c.slotBreakdown||[]).find(s=>s.slot==='未指定');
+  if(!realSlots.length){
+    out.push('- 班が未登録のため班別比較ができません。直播数据の入力時に「班次」を選んで保存すると、どの班の売上が良いか分かります。');
+  }else{
+    const sorted=realSlots.slice().sort((a,b)=>keyOf(b)-keyOf(a));const best=sorted[0],worst=sorted[sorted.length-1];
+    out.push(`- **${best.slot}班が最も高い**：${c.isSum?'合計':'平均'} ${fmtLocalNum(keyOf(best))}${u}（${best.cnt}场）`);
+    if(sorted.length>1)out.push(`- 最も低いのは **${worst.slot}班**：${fmtLocalNum(keyOf(worst))}${u}（${worst.cnt}场）`);
+    if(sorted.length>1&&keyOf(worst)>0){const r=keyOf(best)/keyOf(worst);if(r>=1.5)out.push(`- ${best.slot}班は ${worst.slot}班の約 **${Math.round(r*10)/10}倍**。班による差が大きい。`);}
+    if(unknown&&unknown.cnt)out.push(`- ※班「未指定」のデータが ${unknown.cnt}场 あります（班を登録するとより正確に）。`);
+  }
+  out.push('### 改善のヒント');
+  const tips=[];
+  if(realSlots.length){const sorted=realSlots.slice().sort((a,b)=>keyOf(b)-keyOf(a));const best=sorted[0],worst=sorted[sorted.length-1];
+    tips.push(`**${best.slot}班**の進め方（時間帯・商品・演出・担当）を他の班にも展開する。`);
+    if(sorted.length>1)tips.push(`**${worst.slot}班**はテコ入れ候補。時間帯の見直し・担当や商品の入れ替えを検討。`);
+  }else tips.push('入力時に「班次」を選んで保存すると、班ごとの売上比較・分析ができるようになります。');
+  if(trendDir==='下降')tips.push('直近は下降傾向。露出・在庫・単価などの要因を確認し、早めに対策を。');
+  else if(trendDir==='上昇')tips.push('好調を維持。伸びている要因を記録して再現できるように。');
+  if(sessions<5)tips.push('データ件数がまだ少なめ。件数が増えるほど分析の精度が上がります。');
+  tips.slice(0,4).forEach(t=>out.push('- '+t));
+  return out.join('\n');
+}
+function runAiAnalysis(opts){
+  opts=opts||{};const box=$('chart-ai');if(!box)return;
   const ctx=window.__chartCtx;
-  if(!ctx){if(!auto){box.style.display='block';box.innerHTML='<div class="ai-box err">先にグラフを表示してください。</div>';}return;}
-  let key=localStorage.getItem('pantera_ai_key');
-  if(!key){
-    key=prompt('AI分析に使う Anthropic API キー（sk-ant-...）を入力。ブラウザのローカルにのみ保存されます。');
-    if(!key){if(auto)toggleAiAuto(false);else box.style.display='none';return;}
-    key=key.trim();localStorage.setItem('pantera_ai_key',key);
-  }
-  if(aiBusy){aiPending=true;return;}
-  aiBusy=true;
+  if(!ctx){if(!opts.auto){box.style.display='block';box.innerHTML='<div class="ai-box err">先にグラフを表示してください。</div>';}return;}
   box.style.display='block';
-  const prev=box.querySelector('.ai-md');
-  if(prev){const u=document.createElement('div');u.className='ai-updating muted';u.style.cssText='font-size:11px;margin-bottom:6px;';u.textContent='🔄 更新中…';const aibox=box.querySelector('.ai-box');if(aibox)aibox.insertBefore(u,aibox.firstChild);}
-  else box.innerHTML='<div class="ai-box"><b>🤖 AI分析</b><div class="muted" style="margin-top:6px;">分析中…（数据将发送至 Anthropic API）</div></div>';
-  const p=`あなたは日本のライブコマース(抖音直播)の売上データ分析アシスタントです。以下のデータを分析し、必ず日本語で、Markdownの見出し(###)と箇条書きで簡潔に答えてください。\n観点：1) 全体の傾向、2) どの班(シフト時間帯)の売上・効率が良い/悪いか、3) 具体的な改善提案を3つ。数値を根拠として引用すること。\n\n【データ】\n${buildAiSummary(ctx)}`;
-  try{
-    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:'claude-sonnet-5',max_tokens:1200,messages:[{role:'user',content:p}]})});
-    if(!res.ok){const t=await res.text();throw new Error('API '+res.status+' '+t.slice(0,180));}
-    const j=await res.json();const text=(j.content&&j.content[0]&&j.content[0].text)||'(空の応答)';
-    const ts=new Date().toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
-    box.innerHTML=`<div class="ai-box"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;"><b>🤖 AI分析</b>${aiAuto?'<span class="muted" style="font-size:11px;color:var(--accent);">● 自动更新</span>':''}<span class="muted" style="font-size:11px;">claude-sonnet-5 · 更新 ${ts}</span><span style="flex:1"></span><button class="btn-s b-gray" onclick="localStorage.removeItem('pantera_ai_key');alert('已清除保存的API密钥');">更换密钥</button></div><div class="ai-md">${mdToHtml(text)}</div></div>`;
-  }catch(e){
-    if(auto&&prev){const u=box.querySelector('.ai-updating');if(u){u.style.color='#e08a8a';u.textContent='⚠️ 更新失败（保留上次结果）：'+String(e&&e.message||e);}}
-    else box.innerHTML=`<div class="ai-box err">AI分析に失敗しました：${esc(String(e&&e.message||e))}<div style="margin-top:8px;"><button class="btn-s b-gray" onclick="localStorage.removeItem('pantera_ai_key');runAiAnalysis()">キーを再入力して再試行</button></div></div>`;
-  }
-  aiBusy=false;
-  if(aiPending){aiPending=false;if(aiAuto)scheduleAutoAi();}
+  const text=buildLocalAnalysis(ctx);
+  const ts=new Date().toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  box.innerHTML=`<div class="ai-box"><div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;"><b>📊 自动分析</b>${aiAuto?'<span class="muted" style="font-size:11px;color:var(--accent);">● 自动更新</span>':''}<span class="muted" style="font-size:11px;">内蔵分析（无需API・免费・数据不外传） · 更新 ${ts}</span></div><div class="ai-md">${mdToHtml(text)}</div></div>`;
 }
 document.addEventListener('paste',e=>{
   if(!$('panel-livedata')||!$('panel-livedata').classList.contains('show'))return;
