@@ -281,6 +281,18 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
   <div class="row"><button class="btn ghost" onclick="closeModal('modal-change')">取消</button></div>
 </div></div>
 
+<div class="overlay" id="modal-req" style="z-index:92;"><div class="modal">
+  <h2 id="req-title">变更申请</h2>
+  <div id="req-body"></div>
+  <div class="row"><button class="btn ghost" onclick="closeModal('modal-req')">取消</button><button class="btn" onclick="submitReq()">送信</button></div>
+</div></div>
+
+<div class="overlay" id="modal-reqapprove" style="z-index:93;"><div class="modal">
+  <h2 id="reqa-title">变更申请 · 承認</h2>
+  <div id="reqa-body"></div>
+  <div class="row" style="gap:6px;"><button class="btn ghost" onclick="closeModal('modal-reqapprove')">後で</button><button class="btn" style="background:var(--red);color:#fff;" onclick="approveReq(false)">拒否</button><button class="btn" onclick="approveReq(true)">同意</button></div>
+</div></div>
+
 <div id="screen-calendar" class="screen show">
   <div id="cal-header">
     <span class="uname" id="cal-uname"></span>
@@ -310,6 +322,7 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
   <div id="weekday-row"><div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div></div>
   <div id="cal-grid"></div>
   <button id="fab-myshift" onclick="openMyShift()">我的班表</button>
+  <button id="fab-req" onclick="openMyPendingReq()" style="display:none;position:fixed;right:14px;bottom:74px;z-index:21;border:none;border-radius:24px;padding:11px 18px;background:var(--red);color:#fff;font-size:14px;font-weight:700;font-family:inherit;box-shadow:0 5px 16px rgba(0,0,0,.3);cursor:pointer;">🔔 承認待ち <span id="req-badge"></span></button>
 </div>
 
 <div class="sheet-backdrop" id="sheet-backdrop" onclick="closeAllSheets()"></div>
@@ -641,9 +654,10 @@ function reloginSwitch(){closeModal('modal-relogin');clearRemember();_remembered
 
 async function enterApp(user){
   currentUser=user;saveSession(user);updateHeaderUI();refreshOpenViews();renderCalendar();
+  subscribeChangeReqs();
   if(!user.isMaster){startAttendance();subscribeMessages();const n=await DB.get(`notifications/${user.id}`);if(n){showBanner('您的班表已被管理员修改'+(n.slotLabel?`（${n.slotLabel}）`:'')+(n.reason?`　理由：${n.reason}`:''));DB.remove(`notifications/${user.id}`);}setTimeout(()=>{if(unreadCount()>0)openMessages();},900);}
 }
-function doLogout(){stopAttendance();unsubscribeMessages();if(currentUser)logEvent(currentRoomId,{action:'logout',target:`${currentUser.name} 退出`});clearSession();currentUser=null;closeAllSheets();updateHeaderUI();renderCalendar();}
+function doLogout(){stopAttendance();unsubscribeMessages();unsubscribeChangeReqs();if(currentUser)logEvent(currentRoomId,{action:'logout',target:`${currentUser.name} 退出`});clearSession();currentUser=null;closeAllSheets();updateHeaderUI();renderCalendar();}
 /* ===== 到岗/离岗（按IP判定studio网络。仅登录员工·应用打开时有效） ===== */
 let _attendAt=false,_attendTimer=null,_attendBusy=false;
 async function fetchPublicIp(){try{const r=await fetch('https://api.ipify.org?format=json',{cache:'no-store'});if(!r.ok)return null;const j=await r.json();return (j&&j.ip)||null;}catch(e){return null;}}
@@ -654,7 +668,7 @@ function _attendVis(){if(document.visibilityState==='visible')checkAttendance();
 function startAttendance(){stopAttendance();_attendAt=false;checkAttendance();_attendTimer=setInterval(checkAttendance,60000);window.addEventListener('online',checkAttendance);document.addEventListener('visibilitychange',_attendVis);}
 function stopAttendance(){if(_attendTimer)clearInterval(_attendTimer);_attendTimer=null;window.removeEventListener('online',checkAttendance);document.removeEventListener('visibilitychange',_attendVis);if(_attendAt&&currentUser&&!currentUser.isMaster){_attendAt=false;logEvent(currentRoomId,{action:'leave',target:'离岗'});}}
 function requireAuth(){if(currentUser)return true;openModal('modal-auth');return false;}
-function updateHeaderUI(){const logged=!!currentUser;$('btn-register').style.display=logged?'none':'';$('btn-login').style.display=logged?'none':'';$('btn-logout').style.display=logged?'':'none';$('btn-admin').style.display=(logged&&currentUser.isMaster)?'':'none';$('btn-account').style.display=(logged&&!currentUser.isMaster)?'':'none';$('btn-messages').style.display=(logged&&!currentUser.isMaster)?'':'none';$('cal-uname').textContent=logged?(currentUser.isMaster?'👑 '+currentUser.name:currentUser.name):'';$('fab-myshift').style.display=logged?'':'none';updateMsgBadge();}
+function updateHeaderUI(){const logged=!!currentUser;$('btn-register').style.display=logged?'none':'';$('btn-login').style.display=logged?'none':'';$('btn-logout').style.display=logged?'':'none';$('btn-admin').style.display=(logged&&currentUser.isMaster)?'':'none';$('btn-account').style.display=(logged&&!currentUser.isMaster)?'':'none';$('btn-messages').style.display=(logged&&!currentUser.isMaster)?'':'none';$('cal-uname').textContent=logged?(currentUser.isMaster?'👑 '+currentUser.name:currentUser.name):'';$('fab-myshift').style.display=logged?'':'none';updateMsgBadge();updateReqFab();}
 
 /* ===== 订阅 ===== */
 function subscribeMonth(){if(unsubMonth)unsubMonth();unsubMonth=DB.watch(monthPath(),val=>{monthData=val||{};normalizeMonth();renderCalendar();refreshOpenViews();});}
@@ -815,6 +829,8 @@ function renderDetail(){
   nav.appendChild(mkLbl(`${s.order||'-'}班`,30));
   nav.appendChild(mkNav('▼',()=>detailNavSlot(1),slotIdx>=ids.length-1,true));
   bar.appendChild(nav);body.appendChild(bar);
+  if(currentUser&&!currentUser.isMaster&&ROLES.some(r=>slot[r.key]&&slot[r.key].locked)){
+    const rb=document.createElement('button');rb.className='btn small';rb.style.cssText='margin-bottom:10px;';rb.textContent='📝 变更申请（固定枠の変更を申請）';rb.onclick=()=>openReqCreate(day,slotId);body.appendChild(rb);}
   if(isMaster){const sbar=document.createElement('div');sbar.className='status-bar';
     const lbl=document.createElement('span');lbl.textContent='颜色/状态：';lbl.style.cssText='font-size:12px;color:var(--text-dim);';sbar.appendChild(lbl);
     const cur=slot._status||'';
@@ -899,6 +915,92 @@ function renderMessages(){
 }
 async function confirmRead(msgId){const uid=curUid();if(!uid)return;await DB.set(`rooms/${currentRoomId}/messages/${msgId}/reads/${uid}`,Date.now());renderMessages();updateMsgBadge();}
 async function sendMessage(opt){const id='m_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);await DB.set(`rooms/${currentRoomId}/messages/${id}`,{from:opt.from||'管理员',toType:opt.toType||'all',toUsers:opt.toUsers||null,kind:opt.kind||'notice',title:opt.title||'',body:opt.body||'',createdAt:Date.now(),reads:{}});return id;}
+
+/* ===== 变更申请（ロック枠：同班主播/中控＋管理者 全員承認で自動反映） ===== */
+let changeReqs={},unsubChangeReqs=null,reqCtx=null,reqType='swap',reqApproveCtx=null,reqDismissed={};
+function reqRoleLabel(k){return (ROLES.find(r=>r.key===k)||{}).label||k;}
+function reqTypeLabel(r){const rl=reqRoleLabel(r.roleKey);return r.type==='swap'?`「${rl}」を ${esc(r.fromName)} → ${esc(r.toName)} に交代`:r.type==='release'?`「${rl}」の ${esc(r.fromName)} を外す`:`「${rl}」に ${esc(r.toName)} が入る`;}
+function subscribeChangeReqs(){if(unsubChangeReqs)unsubChangeReqs();unsubChangeReqs=DB.watch(`rooms/${currentRoomId}/changeReqs`,val=>{changeReqs=val||{};updateReqFab();maybePopupReq();});}
+function unsubscribeChangeReqs(){if(unsubChangeReqs)unsubChangeReqs();unsubChangeReqs=null;changeReqs={};updateReqFab();}
+function pendingReqsForMe(){const uid=curUid();if(!uid||!currentUser)return[];return entriesOf(changeReqs).filter(([id,r])=>r&&r.status==='pending').map(([id,r])=>Object.assign({id},r)).filter(r=>currentUser.isMaster?!r.adminOk:(r.need&&r.need[uid]&&!(r.approvals&&r.approvals[uid])));}
+function updateReqFab(){const f=$('fab-req');if(!f)return;const n=currentUser?pendingReqsForMe().length:0;if(n>0){f.style.display='';$('req-badge').textContent=n>1?`(${n})`:'';}else f.style.display='none';}
+function maybePopupReq(){if(!currentUser)return;if($('modal-reqapprove').classList.contains('show'))return;const list=pendingReqsForMe();const r=list.find(x=>!reqDismissed[x.id]);if(r)showReqApprove(r);}
+function openMyPendingReq(){const list=pendingReqsForMe();if(!list.length){showBanner('承認待ちの申請はありません');return;}showReqApprove(list[0]);}
+function showReqApprove(r){reqApproveCtx=r;const s=slots[r.slotId]||{};const need=r.need||{},appr=r.approvals||{};
+  let stat=Object.keys(need).map(uid=>`${esc(need[uid])}：${appr[uid]?'✅':'⏳'}`).join('　')||'（他の承認者なし）';
+  stat+=`　管理者：${r.adminOk?'✅':'⏳'}`;
+  $('reqa-title').textContent=`变更申请 · ${r.month}/${r.day} ${banName(s)}`;
+  $('reqa-body').innerHTML=`<div style="font-size:15px;margin-bottom:8px;">${reqTypeLabel(r)}</div><div class="muted" style="font-size:12px;margin-bottom:6px;">申請者：${esc(r.byName)}${r.reason?'　理由：'+esc(r.reason):''}</div><div class="muted" style="font-size:12px;">承認状況　${stat}</div>`;
+  openModal('modal-reqapprove');
+}
+async function openReqCreate(day,slotId){
+  if(!requireAuth())return;
+  if(currentUser.isMaster){showBanner('管理者は詳細画面で直接変更できます');return;}
+  const usersObj=await DB.get('users')||{};
+  reqCtx={day,slotId,users:entriesOf(usersObj).map(([uid,u])=>({uid,name:u.name})).sort((a,b)=>(a.name||'').localeCompare(b.name||'','zh'))};
+  reqType='swap';renderReqForm();openModal('modal-req');
+}
+function setReqType(t){reqType=t;renderReqForm();}
+function renderReqForm(){
+  const{day,slotId,users}=reqCtx;const s=slots[slotId]||{};const slot=getSlotData(day,slotId)||{};const uid=curUid();
+  $('req-title').textContent=`变更申请 · ${viewMonth}/${day} ${banName(s)}`;
+  const types=[['swap','担当を交代'],['release','自分を外す'],['take','空き枠に入る']];
+  let h=`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">`+types.map(t=>`<button class="btn small ${reqType===t[0]?'':'ghost'}" onclick="setReqType('${t[0]}')">${t[1]}</button>`).join('')+`</div>`;
+  let roleOpts='';
+  ROLES.forEach(r=>{const c=slot[r.key];const holder=c&&c.id?c:null;let ok=false;
+    if(reqType==='swap')ok=!!holder;else if(reqType==='release')ok=holder&&holder.id===uid;else ok=!holder;
+    if(ok)roleOpts+=`<option value="${r.key}">${r.label}${holder?'（现：'+esc(holder.name)+'）':'（空き）'}</option>`;});
+  h+=`<div style="font-size:12px;color:var(--text-dim);margin-bottom:4px;">対象の役割</div><select id="req-role" style="width:100%;padding:9px;border-radius:8px;border:1px solid #d5d5d5;background:#fff;color:var(--ink);font-size:15px;margin-bottom:10px;">${roleOpts||'<option value="">（対象なし）</option>'}</select>`;
+  if(reqType==='swap')h+=`<div style="font-size:12px;color:var(--text-dim);margin-bottom:4px;">交代先の人</div><select id="req-to" style="width:100%;padding:9px;border-radius:8px;border:1px solid #d5d5d5;background:#fff;color:var(--ink);font-size:15px;margin-bottom:10px;">`+users.map(u=>`<option value="${u.uid}">${esc(u.name)}</option>`).join('')+`</select>`;
+  else h+=`<div class="muted" style="font-size:12px;margin-bottom:10px;">あなた（${esc(currentUser.name)}）${reqType==='take'?'がこの枠に入る':'の担当を外す'}申請です。</div>`;
+  h+=`<textarea id="req-reason" placeholder="理由（例：この日は出られなくなった）" style="width:100%;min-height:56px;padding:10px;border-radius:8px;border:1px solid #d5d5d5;background:#fff;color:var(--ink);font-size:15px;font-family:inherit;box-sizing:border-box;resize:vertical;"></textarea>`;
+  h+=`<p class="muted" style="font-size:11px;margin-top:8px;">送信すると、同じ班の主播・中控と管理者へ承認依頼が届きます。全員が同意すると自動で反映されます。</p>`;
+  $('req-body').innerHTML=h;
+}
+async function submitReq(){
+  const{day,slotId}=reqCtx;const slot=getSlotData(day,slotId)||{};const roleKey=$('req-role').value;
+  if(!roleKey){showBanner('対象の役割がありません');return;}
+  const uid=curUid(),byName=currentUser.name,reason=($('req-reason').value||'').trim();
+  const holder=slot[roleKey]&&slot[roleKey].id?slot[roleKey]:null;
+  let fromId=null,fromName=null,toId=null,toName=null;
+  if(reqType==='swap'){if(!holder){showBanner('担当者がいません');return;}fromId=holder.id;fromName=holder.name;toId=$('req-to').value;toName=(reqCtx.users.find(u=>u.uid===toId)||{}).name||'';if(toId===fromId){showBanner('同じ人です');return;}}
+  else if(reqType==='release'){if(!holder||holder.id!==uid){showBanner('自分が担当している役割を選んでください');return;}fromId=holder.id;fromName=holder.name;}
+  else{if(holder){showBanner('空きの役割を選んでください');return;}toId=uid;toName=byName;}
+  const need={};['A','B','C'].forEach(k=>{const hh=slot[k];if(hh&&hh.id&&hh.id!==uid)need[hh.id]=hh.name;});
+  if(toId&&toId!==uid)need[toId]=toName;
+  const id='cr_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
+  const req={year:viewYear,month:viewMonth,day,slotId,roleKey,type:reqType,fromId:fromId||null,fromName:fromName||null,toId:toId||null,toName:toName||null,reason,byId:uid,byName,createdAt:Date.now(),need,approvals:{},adminOk:false,status:'pending'};
+  await DB.set(`rooms/${currentRoomId}/changeReqs/${id}`,req);
+  const s=slots[slotId]||{};const tlbl=req.type==='swap'?`「${reqRoleLabel(roleKey)}」を ${fromName}→${toName} に交代`:req.type==='release'?`「${reqRoleLabel(roleKey)}」の ${fromName} を外す`:`「${reqRoleLabel(roleKey)}」に ${byName} が入る`;
+  const body=`${viewMonth}/${day} ${banName(s)}：${tlbl}\n申請者：${byName}${reason?'\n理由：'+reason:''}\n\n🔔「承認待ち」ボタンから同意/拒否できます。`;
+  for(const auid of Object.keys(need))await sendMessage({from:byName,toType:'users',toUsers:{[auid]:true},kind:'req',title:'班次の変更申請（要承認）',body});
+  logEvent(currentRoomId,{action:'req',target:`${viewMonth}/${day} ${banName(s)} ${reqRoleLabel(roleKey)} 变更申请`,after:tlbl});
+  closeModal('modal-req');showBanner('変更申請を送信しました。全員の承認で自動反映されます。');
+}
+function reqComplete(r){if(!r||r.status!=='pending'||!r.adminOk)return false;const need=r.need||{};for(const uid of Object.keys(need)){if(!(r.approvals&&r.approvals[uid]))return false;}return true;}
+async function approveReq(ok){
+  const r=reqApproveCtx;if(!r)return;const path=`rooms/${currentRoomId}/changeReqs/${r.id}`;
+  const fresh=await DB.get(path);if(!fresh||fresh.status!=='pending'){closeModal('modal-reqapprove');reqApproveCtx=null;showBanner('この申請は既に処理済みです');return;}
+  if(!ok){await DB.set(`${path}/status`,'rejected');if(fresh.byId!==MASTER_ID)await sendMessage({from:currentUser.name,toType:'users',toUsers:{[fresh.byId]:true},kind:'req',title:'変更申請が拒否されました',body:`${reqTypeLabel(fresh)} の申請は ${currentUser.name} により拒否されました。`});closeModal('modal-reqapprove');reqApproveCtx=null;reqDismissed[r.id]=1;showBanner('拒否しました');return;}
+  if(currentUser.isMaster)await DB.set(`${path}/adminOk`,true);else await DB.set(`${path}/approvals/${curUid()}`,Date.now());
+  closeModal('modal-reqapprove');reqApproveCtx=null;
+  const nf=await DB.get(path);nf.id=r.id;await tryApplyReq(nf);showBanner('承認しました');
+}
+async function tryApplyReq(r){
+  if(!reqComplete(r))return;
+  const base=`rooms/${currentRoomId}/shifts/${r.year}/${r.month}/${r.day}/${r.slotId}/${r.roleKey}`;
+  const cur=await DB.get(base)||{};const wasLocked=!!cur.locked;
+  if(r.type==='swap'||r.type==='take'){const cell={id:r.toId,name:r.toName,byReq:true};if(wasLocked)cell.locked=true;await DB.set(base,cell);}
+  else{if(wasLocked)await DB.set(base,{locked:true});else await DB.remove(base);}
+  await DB.set(`rooms/${currentRoomId}/changeReqs/${r.id}/status`,'applied');
+  const s=slots[r.slotId]||{};const rl=reqRoleLabel(r.roleKey);
+  const tlbl=r.type==='swap'?`${rl}：${r.fromName}→${r.toName}`:r.type==='release'?`${rl}：${r.fromName} を外しました`:`${rl}：${r.toName} が担当に`;
+  const notify={};Object.keys(r.need||{}).forEach(u=>notify[u]=1);if(r.byId)notify[r.byId]=1;if(r.fromId)notify[r.fromId]=1;if(r.toId)notify[r.toId]=1;
+  const uids=Object.keys(notify).filter(u=>u&&u!==MASTER_ID);
+  if(uids.length){const tu={};uids.forEach(u=>tu[u]=true);await sendMessage({from:'系统',toType:'users',toUsers:tu,kind:'change',title:'変更申請が承認され反映されました',body:`${r.month}/${r.day} ${banName(s)}　${tlbl}`});}
+  logEvent(currentRoomId,{action:'edit',target:`${r.month}/${r.day} ${banName(s)} ${rl} 变更申请→反映`,after:tlbl});
+  renderCalendar();if(detailCtx)renderDetail();
+}
 async function toggleLock(day,slotId,roleKey){
   const path=`${monthPath()}/${day}/${slotId}/${roleKey}`;const cell=(getSlotData(day,slotId)||{})[roleKey]||null;
   const s=slots[slotId]||{};const roleLbl=(ROLES.find(r=>r.key===roleKey)||{}).label||roleKey;
