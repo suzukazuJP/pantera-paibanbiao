@@ -1090,6 +1090,7 @@ function initLiveData(){
   if(!$('ld-time').value)$('ld-time').value=`${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
   loadLdSlots(sel.value);
   if($('lw-auto'))$('lw-auto').checked=watchAuto;
+  restoreWatchFolder();
   resetLdForm();
   loadLdSessions();
 }
@@ -1208,9 +1209,33 @@ async function ldHandleFile(file){
 /* ===== 自动监视文件夹（Chrome/Edge の File System Access API・此页保持打开时に監視） ===== */
 let watchHandle=null,watchTimer=null,watchProcessed=new Set(),watchQueue=[],watchPolling=false,watchAuto=localStorage.getItem('pantera_watch_auto')==='1';
 function watchSupported(){return 'showDirectoryPicker' in window;}
+/* 選んだフォルダのハンドルを IndexedDB に保存し、次回以降は再選択不要で復元する */
+function idbOpen(){return new Promise((res,rej)=>{const o=indexedDB.open('pantera_watch',1);o.onupgradeneeded=()=>{try{o.result.createObjectStore('h');}catch(e){}};o.onsuccess=()=>res(o.result);o.onerror=()=>rej(o.error);});}
+async function idbHandleSet(handle){try{const db=await idbOpen();return await new Promise(res=>{const tx=db.transaction('h','readwrite');tx.objectStore('h').put(handle,'dir');tx.oncomplete=()=>res(true);tx.onerror=()=>res(false);});}catch(e){return false;}}
+async function idbHandleGet(){try{const db=await idbOpen();return await new Promise(res=>{const tx=db.transaction('h','readonly');const rq=tx.objectStore('h').get('dir');rq.onsuccess=()=>res(rq.result||null);rq.onerror=()=>res(null);});}catch(e){return null;}}
 async function pickWatchFolder(){
   if(!watchSupported()){alert('此功能需要 Chrome 或 Edge 浏览器（Safari 不支持文件夹监视）。');return;}
-  try{const h=await window.showDirectoryPicker({mode:'read'});watchHandle=h;startWatch();}catch(e){}
+  try{const h=await window.showDirectoryPicker({mode:'read'});watchHandle=h;await idbHandleSet(h);startWatch();}catch(e){}
+}
+async function restoreWatchFolder(){
+  if(watchHandle||!watchSupported())return;
+  const h=await idbHandleGet();if(!h)return;
+  try{
+    const perm=await h.queryPermission({mode:'read'});
+    if(perm==='granted'){watchHandle=h;startWatch();return;}
+    watchHandle=h; // 記憶あり・権限だけ再取得が必要
+    const pk=$('lw-pick');if(pk){pk.textContent='▶ 监视を再开（'+h.name+'）';pk.onclick=resumeWatchFolder;}
+    $('lw-status').textContent='前回のフォルダ「'+h.name+'」を記憶中。「监视を再开」を押して続行';
+  }catch(e){}
+}
+async function resumeWatchFolder(){
+  if(!watchHandle){pickWatchFolder();return;}
+  try{
+    const perm=await watchHandle.requestPermission({mode:'read'});
+    const pk=$('lw-pick');
+    if(perm==='granted'){if(pk){pk.textContent='选择监视文件夹';pk.onclick=pickWatchFolder;}startWatch();}
+    else{if(pk){pk.textContent='选择监视文件夹';pk.onclick=pickWatchFolder;}$('lw-status').textContent='権限が拒否されました。「选择监视文件夹」で選び直してください';}
+  }catch(e){pickWatchFolder();}
 }
 function startWatch(){
   if(!watchHandle)return;
