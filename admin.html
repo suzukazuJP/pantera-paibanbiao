@@ -267,6 +267,7 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
           <p class="muted" style="font-size:11px;margin-top:5px;line-height:1.6;">Chrome / Edge 限定。指定した共有(同期)フォルダに新しい截图が来ると自動でOCRします。<b>「全自动保存」ON</b>＝そのまま自動で入库（確認不要・班次は未指定、後で修改/删除可）。OFF＝下の「待确认队列」で核対して保存。<b>この画面をChromeで開いている間だけ</b>監視します。保存先は上の直播间セレクタの部屋。※OCRは一部誤読するため、全自動時は後でグラフ等で確認を。</p>
           <div class="lw-drop" id="lw-drop" onclick="$('lw-file').click()" ondragover="event.preventDefault();this.classList.add('drag')" ondragleave="this.classList.remove('drag')" ondrop="lwDrop(event)">➕ 手动添加图片：点击选择文件 ・ 拖入图片 ・ 或直接 Cmd+V / Ctrl+V 粘贴（フォルダを使わず直接入れられます。同じ自動処理に流れます）</div>
           <input type="file" id="lw-file" accept="image/*" multiple style="display:none;" onchange="manualAddImages(this.files)">
+          <div class="muted" id="lw-files" style="font-size:11px;margin-top:8px;line-height:1.9;"></div>
           <div id="lw-queue"></div>
         </div>
         <div class="ld-form">
@@ -1219,20 +1220,28 @@ function startWatch(){
   if(watchTimer)clearInterval(watchTimer);
   pollWatchFolder();watchTimer=setInterval(pollWatchFolder,6000);
 }
-function stopWatch(){if(watchTimer)clearInterval(watchTimer);watchTimer=null;const pk=$('lw-pick'),sp=$('lw-stop');if(pk)pk.style.display='';if(sp)sp.style.display='none';$('lw-status').textContent='已停止监视';}
+function stopWatch(){if(watchTimer)clearInterval(watchTimer);watchTimer=null;const pk=$('lw-pick'),sp=$('lw-stop');if(pk)pk.style.display='';if(sp)sp.style.display='none';$('lw-status').textContent='已停止监视';if($('lw-files'))$('lw-files').innerHTML='';}
 async function pollWatchFolder(){
   if(!watchHandle||watchPolling)return;watchPolling=true;
   try{
     const perm=await watchHandle.queryPermission({mode:'read'});
     if(perm!=='granted'){$('lw-status').textContent='授权已失效，请重新「选择监视文件夹」';watchPolling=false;return;}
-    const found=[];
+    const found=[],all=[];
     for await(const [name,handle] of watchHandle.entries()){
-      if(handle.kind!=='file'||!/\.(png|jpe?g|webp)$/i.test(name)||watchProcessed.has(name))continue;
-      found.push([name,handle]);
+      if(handle.kind!=='file'||!/\.(png|jpe?g|webp)$/i.test(name))continue;
+      all.push(name);
+      if(!watchProcessed.has(name))found.push([name,handle]);
     }
+    renderWatchFiles(all);
     for(const [name,handle] of found){watchProcessed.add(name);const file=await handle.getFile();await addToWatchQueue(file,name);}
   }catch(e){$('lw-status').textContent='监视出错：'+(e.message||e);}
   watchPolling=false;
+}
+function renderWatchFiles(names){
+  const el=$('lw-files');if(!el)return;
+  if(!names||!names.length){el.innerHTML='📂 フォルダ内に画像はまだありません（Windowsで「配信データ」に入れると、ここに一覧が出ます）';return;}
+  const sorted=names.slice().sort();
+  el.innerHTML='📂 フォルダ内の画像 <b>'+names.length+'</b> 件（✅=取込済 ⏳=未取込）<br>'+sorted.map(n=>`${watchProcessed.has(n)?'✅':'⏳'} ${esc(n)}`).join('　');
 }
 let slotOptsCache={};
 async function ensureSlotOpts(rid){
