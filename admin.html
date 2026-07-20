@@ -1175,21 +1175,46 @@ async function ocrRegion(srcImg,box,scale){
   const r=await Tesseract.recognize(blob,'eng');
   return (r.data.text||'').trim();
 }
+/* 「直播大屏」フル画面のスクショから、色付きの指标パネル領域だけを自動検出して切り出す。
+   （左のグラフ・下の商品リスト等の余計な数字を除外し、誤読を大幅に減らす）。既に指标カードだけの画像なら null=切り出し不要。 */
+function detectColorPanel(img){
+  const W=img.naturalWidth,H=img.naturalHeight;if(!W||!H)return null;
+  const c=document.createElement('canvas');c.width=W;c.height=H;const cx=c.getContext('2d');cx.drawImage(img,0,0);
+  let d;try{d=cx.getImageData(0,0,W,H).data;}catch(e){return null;}
+  const step=Math.max(2,Math.round(Math.max(W,H)/1200));
+  const colC=new Array(W).fill(0),rowC=new Array(H).fill(0);let total=0;
+  for(let y=0;y<H;y+=step)for(let x=0;x<W;x+=step){const i=(y*W+x)*4;const mx=Math.max(d[i],d[i+1],d[i+2]),mn=Math.min(d[i],d[i+1],d[i+2]);if(mx-mn>28&&mx>50){colC[x]++;rowC[y]++;total++;}}
+  if(total<300)return null;
+  const cMax=Math.max.apply(null,colC),rMax=Math.max.apply(null,rowC);
+  function bnd(a,t){let lo=-1,hi=-1;for(let i=0;i<a.length;i++)if(a[i]>=t){if(lo<0)lo=i;hi=i;}return[lo,hi];}
+  let cb=bnd(colC,cMax*0.25),rb=bnd(rowC,rMax*0.25);let x0=cb[0],x1=cb[1],y0=rb[0],y1=rb[1];
+  if(x0<0||y0<0)return null;
+  const pX=Math.round((x1-x0)*0.015),pY=Math.round((y1-y0)*0.02);
+  x0=Math.max(0,x0-pX);y0=Math.max(0,y0-pY);x1=Math.min(W,x1+pX);y1=Math.min(H,y1+pY);
+  if((x1-x0)>W*0.85&&(y1-y0)>H*0.72)return null; /* ほぼ全面が色付き＝既に指标カードのみ→切り出さない */
+  if((x1-x0)<W*0.2||(y1-y0)<H*0.12)return null;
+  return {x0,y0,x1,y1};
+}
 async function ocrLiveImage(file){
   const origImg=await decodeImageFile(file);
-  const maxDim=2400;let w=origImg.naturalWidth,h=origImg.naturalHeight;
+  const panel=detectColorPanel(origImg);
+  let sx=0,sy=0,sw=origImg.naturalWidth,sh=origImg.naturalHeight;
+  if(panel){sx=panel.x0;sy=panel.y0;sw=panel.x1-panel.x0;sh=panel.y1-panel.y0;}
+  const maxDim=2400;let w=sw,h=sh;
   if(Math.max(w,h)>maxDim){const s=maxDim/Math.max(w,h);w=Math.round(w*s);h=Math.round(h*s);}
   const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
-  const cx=canvas.getContext('2d');cx.drawImage(origImg,0,0,w,h);enhanceForOcr(cx,w,h);
+  const cx=canvas.getContext('2d');cx.imageSmoothingEnabled=true;cx.imageSmoothingQuality='high';
+  cx.drawImage(origImg,sx,sy,sw,sh,0,0,w,h);enhanceForOcr(cx,w,h);
   const blob=await new Promise((res,rej)=>canvas.toBlob(b=>b?res(b):rej(new Error('压缩图片失败')),'image/png'));
   const {data}=await Tesseract.recognize(blob,'chi_sim+eng');
   const parsed=parseLiveStatsText(data.text);const hits={};Object.keys(parsed).forEach(k=>hits[k]=true);
-  const words=(data.words||[]).filter(wd=>wd.text&&wd.text.trim());const scale=origImg.naturalWidth/w;
+  const words=(data.words||[]).filter(wd=>wd.text&&wd.text.trim());const rx=sw/w,ry=sh/h;
   const capsules=[{key:'orders',label:'成交件数'},{key:'viewersNow',label:'浏览人数'}];
   for(const cap of capsules){
     if(parsed[cap.key]!=null)continue;
     const box=locateValueBoxAfterLabel(words,cap.label);if(!box)continue;
-    try{const txt=await ocrRegion(origImg,{x0:box.x0*scale,y0:box.y0*scale,x1:box.x1*scale,y1:box.y1*scale},5);const v=parseRescuedNum(txt);if(v!=null){parsed[cap.key]=v;hits[cap.key]=true;}}catch(e){}
+    const b2={x0:sx+box.x0*rx,y0:sy+box.y0*ry,x1:sx+box.x1*rx,y1:sy+box.y1*ry};
+    try{const txt=await ocrRegion(origImg,b2,5);const v=parseRescuedNum(txt);if(v!=null){parsed[cap.key]=v;hits[cap.key]=true;}}catch(e){}
   }
   return {parsed,hits,rawText:data.text||''};
 }
