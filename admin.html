@@ -1234,13 +1234,23 @@ async function pollWatchFolder(){
   }catch(e){$('lw-status').textContent='监视出错：'+(e.message||e);}
   watchPolling=false;
 }
-async function saveWatchedRecord(rid,y,m,d,parsed){
+let slotOptsCache={};
+async function ensureSlotOpts(rid){
+  if(slotOptsCache[rid]!=null)return slotOptsCache[rid];
+  const s=await DB.get(`rooms/${rid}/slots`)||{};
+  const list=Object.values(s).sort((a,b)=>(a.order||0)-(b.order||0));
+  slotOptsCache[rid]='<option value="">未指定班次</option>'+list.map(x=>`<option value="${x.order}">${x.order}班 ${esc(x.time||'')}</option>`).join('');
+  return slotOptsCache[rid];
+}
+async function saveWatchedRecord(rid,y,m,d,parsed,timeStr,slot){
   const values={};LIVE_FIELDS.forEach(f=>{if(parsed&&parsed[f.key]!=null)values[f.key]=parsed[f.key];});
   if(!Object.keys(values).length)throw new Error('未识别到数值');
-  const rec=Object.assign({ts:new Date(y,m-1,d,0,0).getTime(),source:'ocr-auto'},values);
+  let hh=0,mm=0;if(timeStr&&/^\d{1,2}:\d{2}/.test(timeStr)){const p=timeStr.split(':');hh=parseInt(p[0],10)||0;mm=parseInt(p[1],10)||0;}
+  const rec=Object.assign({ts:new Date(y,m-1,d,hh,mm).getTime(),source:'ocr-auto'},values);
+  if(slot!=null&&slot!==''){const sl=parseInt(slot,10);if(!isNaN(sl))rec.slot=sl;}
   const key='k'+Date.now()+Math.random().toString(36).slice(2,6);
   await DB.set(`rooms/${rid}/liveStats/${y}/${m}/${d}/${key}`,rec);
-  await logEvent(rid,{action:'edit',target:`直播数据(自动监视${watchAuto?'·全自动':''}) ${y}/${m}/${d}`,after:`GMV=${rec.gmv!=null?rec.gmv:'-'}`});
+  await logEvent(rid,{action:'edit',target:`直播数据(自动监视${watchAuto?'·全自动':''}) ${y}/${m}/${d}${rec.slot!=null?` ${rec.slot}班`:''}`,after:`GMV=${rec.gmv!=null?rec.gmv:'-'}`});
   return {y,m,d,key};
 }
 function manualAddImages(fileList){
@@ -1257,10 +1267,11 @@ async function addToWatchQueue(file,name){
   const d0=new Date(file.lastModified||Date.now());
   const item={id,name,rid:$('ld-room').value,mtime:file.lastModified||Date.now(),parsed:null,busy:true,error:null,saved:null};
   watchQueue.unshift(item);renderWatchQueue();
+  ensureSlotOpts(item.rid).then(()=>{if(!item.busy)renderWatchQueue();});
   try{const {parsed}=await ocrLiveImage(file);item.parsed=parsed;}catch(e){item.error=String(e&&e.message||e);}
   item.busy=false;
   if(!item.error&&watchAuto){
-    try{item.saved=await saveWatchedRecord(item.rid,d0.getFullYear(),d0.getMonth()+1,d0.getDate(),item.parsed);loadLdSessions();}
+    try{item.saved=await saveWatchedRecord(item.rid,d0.getFullYear(),d0.getMonth()+1,d0.getDate(),item.parsed,`${pad2(d0.getHours())}:${pad2(d0.getMinutes())}`,null);loadLdSessions();}
     catch(e){item.error='自动保存失败：'+(e&&e.message||e);}
   }
   renderWatchQueue();
@@ -1268,9 +1279,9 @@ async function addToWatchQueue(file,name){
 function renderWatchQueue(){
   const box=$('lw-queue');if(!box)return;
   if(!watchQueue.length){box.innerHTML='';return;}
-  const head=watchAuto?'自动保存记录（'+watchQueue.length+'）— 已自动入库，如有误可修改/删除':'待确认队列（'+watchQueue.length+'）— 核对数值后一键保存（班次默认未指定）';
+  const head=watchAuto?'自动保存记录（'+watchQueue.length+'）— 已自动入库，如有误可修改/删除':'待确认队列（'+watchQueue.length+'）— 核对数值 · 可设定日期/时间/班次后保存';
   box.innerHTML='<div class="dash-h" style="margin:10px 0 6px;">'+head+'</div>'+watchQueue.map(it=>{
-    const d=new Date(it.mtime);const ds=`${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+    const d=new Date(it.mtime);const ds=`${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;const tsv=`${pad2(d.getHours())}:${pad2(d.getMinutes())}`;const slotOpts=slotOptsCache[it.rid]||'<option value="">未指定班次</option>';
     if(it.busy)return `<div class="wq-card"><b>${esc(it.name)}</b> <span class="muted">识别中…</span></div>`;
     if(it.error)return `<div class="wq-card err"><b>${esc(it.name)}</b>：${esc(it.error)} <button class="btn-s b-gray" style="margin-left:8px" onclick="dropQueueItem('${it.id}')">删除</button></div>`;
     const vals=LIVE_FIELDS.filter(f=>it.parsed[f.key]!=null).map(f=>`${esc(f.label)}:<b>${it.parsed[f.key]}</b>${f.unit}`).join(' · ')||'(未识别到数值)';
@@ -1287,11 +1298,15 @@ function renderWatchQueue(){
     return `<div class="wq-card">
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
         <b>${esc(it.name)}</b>
-        <label class="muted" style="font-size:11px;">日期 <input type="date" id="wqd-${it.id}" value="${ds}"></label>
         <span style="flex:1"></span>
         <button class="btn-s b-blue" onclick="confirmQueueItem('${it.id}')">✓ 确定保存</button>
         <button class="btn-s b-gray" onclick="editQueueItem('${it.id}')">✎ 编辑</button>
         <button class="btn-s b-red" onclick="dropQueueItem('${it.id}')">✕</button>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:7px;">
+        <label class="muted" style="font-size:11px;">日期 <input type="date" id="wqd-${it.id}" value="${ds}"></label>
+        <label class="muted" style="font-size:11px;">时间 <input type="time" id="wqt-${it.id}" value="${tsv}"></label>
+        <label class="muted" style="font-size:11px;">班次 <select id="wqs-${it.id}">${slotOpts}</select></label>
       </div>
       <div class="muted" style="font-size:12px;margin-top:5px;line-height:1.6;">${vals}</div>
     </div>`;
@@ -1299,9 +1314,11 @@ function renderWatchQueue(){
 }
 function dropQueueItem(id){watchQueue=watchQueue.filter(x=>x.id!==id);renderWatchQueue();}
 function toggleWatchAuto(on){watchAuto=!!on;localStorage.setItem('pantera_watch_auto',watchAuto?'1':'0');if($('lw-auto'))$('lw-auto').checked=watchAuto;renderWatchQueue();}
-function editQueueItem(id){const it=watchQueue.find(x=>x.id===id);if(!it)return;
-  if(rooms[it.rid])$('ld-room').value=it.rid;loadLdSlots(it.rid);
-  const dv=$('wqd-'+id);if(dv)$('ld-date').value=dv.value;$('ld-time').value='';$('ld-slot').value='';
+async function editQueueItem(id){const it=watchQueue.find(x=>x.id===id);if(!it)return;
+  const dv=$('wqd-'+id),tv=$('wqt-'+id),sv=$('wqs-'+id);
+  const dval=dv?dv.value:'',tval=tv?tv.value:'',sval=sv?sv.value:'';
+  if(rooms[it.rid])$('ld-room').value=it.rid;await loadLdSlots(it.rid,sval!==''?parseInt(sval,10):null);
+  if(dval)$('ld-date').value=dval;$('ld-time').value=tval;
   ldEditKey=null;renderLdGrid(it.parsed||{},{});$('ld-edit-tag').textContent='从监视队列载入（核对后按「保存本场数据」确定）';
   dropQueueItem(id);$('livedata-scroll').scrollTop=0;
 }
@@ -1311,7 +1328,9 @@ async function confirmQueueItem(id){
   const it=watchQueue.find(x=>x.id===id);if(!it)return;
   const dv=$('wqd-'+id);const ds=dv?dv.value:'';if(!ds){alert('请选择日期');return;}
   const [y,m,d]=ds.split('-').map(x=>parseInt(x,10));
-  try{it.saved=await saveWatchedRecord(it.rid,y,m,d,it.parsed);}catch(e){alert(e&&e.message||'保存失败');return;}
+  const timeStr=($('wqt-'+id)||{}).value||'';
+  const slot=($('wqs-'+id)||{}).value||'';
+  try{it.saved=await saveWatchedRecord(it.rid,y,m,d,it.parsed,timeStr,slot);}catch(e){alert(e&&e.message||'保存失败');return;}
   dropQueueItem(id);loadLdSessions();
 }
 function collectLdForm(){
