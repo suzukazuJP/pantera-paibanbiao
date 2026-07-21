@@ -1411,6 +1411,7 @@ function xiBuild(wb){
     if(!arr.length)continue;
     const ci=xiColIndex(arr[0]);
     if(ci.category==null&&ci.account==null)continue;
+    const shMonth=(function(){const z=String(sn).replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0));const mm=z.match(/(\d{1,2})\s*月/);return mm?parseInt(mm[1],10):null;})();
     let ly=null,lm=null,ld=null;
     for(let i=1;i<arr.length;i++){
       const r=arr[i];if(!r||r.every(x=>x==null))continue;
@@ -1419,7 +1420,13 @@ function xiBuild(wb){
       const dv=ci.date!=null?r[ci.date]:null;
       if(typeof dv==='number'&&typeof XLSX.SSF!=='undefined'){const dc=XLSX.SSF.parse_date_code(dv);if(dc&&dc.y){ly=dc.y;lm=dc.m;ld=dc.d;}}
       else if(dv instanceof Date){ly=dv.getFullYear();lm=dv.getMonth()+1;ld=dv.getDate();}
-      else if(typeof dv==='string'&&dv.trim()){const mm=dv.match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);if(mm){ly=+mm[1];lm=+mm[2];ld=+mm[3];}else{const m2=dv.match(/(\d{1,2})\D+(\d{1,2})/);if(m2){lm=+m2[1];ld=+m2[2];ly=ly||new Date().getFullYear();}}}
+      else if(typeof dv==='string'&&dv.trim()){
+        const z=dv.replace(/[０-９]/g,c=>String.fromCharCode(c.charCodeAt(0)-0xFEE0));
+        const full=z.match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);
+        if(full&&+full[2]>=1&&+full[2]<=12&&+full[3]>=1&&+full[3]<=31){ly=+full[1];lm=+full[2];ld=+full[3];}
+        else{const nums=(z.match(/\d+/g)||[]).map(Number);let day=null;for(let k=nums.length-1;k>=0;k--){if(nums[k]>=1&&nums[k]<=31){day=nums[k];break;}}
+          if(day!=null){ld=day;lm=shMonth||lm||1;ly=ly||new Date().getFullYear();}}
+      }
       if(ly==null||lm==null||ld==null)continue;
       const account=acctCell!=null?String(acctCell).trim():'';
       const category=catCell!=null?String(catCell).trim():'';
