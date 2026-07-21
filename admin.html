@@ -270,6 +270,19 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
           <div class="muted" id="lw-files" style="font-size:11px;margin-top:8px;line-height:1.9;"></div>
           <div id="lw-queue"></div>
         </div>
+        <div class="ld-watch" id="ld-import" style="margin-top:10px;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <b>📊 导入直播数据表（Excel）</b>
+            <span class="muted" style="font-size:12px;">→ 导入到：</span>
+            <select id="xi-room" title="导入到哪个直播间" style="min-width:120px;"></select>
+            <button class="btn-s b-gray" id="xi-file-btn" onclick="$('xi-file').click()">选择 .xlsx 文件</button>
+            <button class="btn-s b-gray" id="xi-folder-btn" onclick="importXlsxFromFolder()" style="display:none;">📁 从监视文件夹读取</button>
+            <input type="file" id="xi-file" accept=".xlsx" style="display:none;" onchange="importXlsxFile(this.files[0]);this.value=''">
+            <span class="muted" id="xi-status"></span>
+          </div>
+          <p class="muted" style="font-size:11px;margin-top:5px;line-height:1.6;">kdocs（金山文档）の「Tiktok东京每日直播数据表.xlsx」を読み込み、月別シート全部から各行を直播数据に取り込みます（<b>OCRではなく手入力の正確な数字</b>）。<b>账号・品类・主播</b>もレコードに保存し、下の「数据图表」で分组分析できます。日期の結合セルは自動で繰り下げ、`63.64k`/小数の点击率なども自動変換。同じ日・账号・品类・主播は<b>再取込で上書き</b>（重複しません）。読み込み後にプレビューで内容を確認してから「确认导入」してください。135MBファイルは解析に十数秒かかります。</p>
+          <div id="xi-preview" style="margin-top:8px;"></div>
+        </div>
         <div class="ld-form">
           <div class="ld-drop" id="ld-drop" onclick="$('ld-file').click()">📷 点击选择「直播数据大屏」截图上传，或直接 Cmd+V / Ctrl+V 粘贴截图，自动识别其中的数据（识别后可核对/修改再保存）</div>
           <input type="file" id="ld-file" accept="image/*" style="display:none;" onchange="ldHandleFile(this.files[0])">
@@ -295,6 +308,7 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
         <select id="chart-room" onchange="chartRoom=this.value;populateChartSlots();loadCharts()"></select>
         <select id="chart-metric" onchange="chartMetric=this.value;loadCharts()"></select>
         <select id="chart-slot" onchange="chartSlot=this.value;loadCharts()"><option value="">全部班</option></select>
+        <select id="chart-break" onchange="chartBreak=this.value;loadCharts()" title="分组维度（Excel导入用）"><option value="">不分组</option><option value="category">按品类</option><option value="host">按主播</option><option value="account">按账号</option></select>
         <input type="date" id="chart-from" onchange="chartFrom=this.value;loadCharts()">
         <span class="muted">~</span>
         <input type="date" id="chart-to" onchange="chartTo=this.value;loadCharts()">
@@ -407,9 +421,10 @@ function switchTab(t){
   else if(t==='messages')loadMessages();
 }
 /* ===== 数据图表（直播数据のtime-series・班別・期間指定・AI分析） ===== */
-const LIVE_SUM_KEYS=new Set(['gmv','orders','exposure','views','viewersNow','productClicks','newFollowers']);
+const LIVE_SUM_KEYS=new Set(['gmv','orders','exposure','views','viewersNow','productClicks','newFollowers','adSpend']);
 const CHART_GRAN_LABEL={day:'按日',week:'按周',month:'按月',year:'按年'};
-let chartPeriod='day',chartRoom='all',chartMetric='gmv',chartSlot='',chartFrom='',chartTo='',chartInst=null;
+let chartPeriod='day',chartRoom='all',chartMetric='gmv',chartSlot='',chartBreak='',chartFrom='',chartTo='',chartInst=null;
+const CHART_BREAK_LABEL={category:'按品类',host:'按主播',account:'按账号'};
 function fmtD(d){return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;}
 function initCharts(){
   const rs=$('chart-room');
@@ -464,12 +479,18 @@ async function loadCharts(){
   const recs=[];
   for(const rid of rids){
     const stats=await DB.get(`rooms/${rid}/liveStats`);if(!stats)continue;
-    entriesOf(stats).forEach(([yS,yO])=>{const y=parseInt(yS,10);entriesOf(yO).forEach(([mS,mO])=>{const m=parseInt(mS,10);entriesOf(mO).forEach(([dS,dO])=>{const d=parseInt(dS,10);const dt=new Date(y,m-1,d);if(dt<from||dt>to)return;entriesOf(dO).forEach(([,rec])=>{if(!rec)return;const v=rec[metric];if(v==null||isNaN(v))return;recs.push({y,m,d,slot:rec.slot!=null?rec.slot:null,v:Number(v)});});});});});
+    entriesOf(stats).forEach(([yS,yO])=>{const y=parseInt(yS,10);entriesOf(yO).forEach(([mS,mO])=>{const m=parseInt(mS,10);entriesOf(mO).forEach(([dS,dO])=>{const d=parseInt(dS,10);const dt=new Date(y,m-1,d);if(dt<from||dt>to)return;entriesOf(dO).forEach(([,rec])=>{if(!rec)return;const v=rec[metric];if(v==null||isNaN(v))return;recs.push({y,m,d,slot:rec.slot!=null?rec.slot:null,cat:rec.category||null,host:rec.host||null,acct:rec.account||null,v:Number(v)});});});});});
   }
   let filtered=recs;
   if(chartSlot&&chartSlot!=='__by')filtered=recs.filter(r=>String(r.slot)===String(chartSlot));
   let labels,data,cnt;
-  if(chartSlot==='__by'){
+  if(chartBreak){
+    const dk=chartBreak==='category'?'cat':chartBreak==='host'?'host':'acct';
+    const map={};filtered.forEach(r=>{const k=r[dk]||'未指定';(map[k]=map[k]||{s:0,c:0});map[k].s+=r.v;map[k].c++;});
+    const keys=Object.keys(map).sort((a,b)=>isSum?map[b].s-map[a].s:(map[b].s/map[b].c)-(map[a].s/map[a].c));
+    labels=keys;cnt=keys.map(k=>map[k].c);
+    data=keys.map(k=>isSum?map[k].s:(map[k].c?map[k].s/map[k].c:0));
+  }else if(chartSlot==='__by'){
     const map={};filtered.forEach(r=>{const k=r.slot!=null?r.slot:'未指定';(map[k]=map[k]||{s:0,c:0});map[k].s+=r.v;map[k].c++;});
     const keys=Object.keys(map).sort((a,b)=>a==='未指定'?1:b==='未指定'?-1:a-b);
     labels=keys.map(k=>k==='未指定'?'未指定':`${k}班`);cnt=keys.map(k=>map[k].c);
@@ -484,12 +505,13 @@ async function loadCharts(){
   let agg;if(isSum)agg=data.reduce((a,b)=>a+b,0);else{const nz=data.filter((v,i)=>cnt[i]>0);agg=nz.length?nz.reduce((a,b)=>a+b,0)/nz.length:0;}
   $('chart-kpi').innerHTML=`<div class="kpi-card"><div class="num">${fmtChartNum(agg)}</div><div class="lbl">${isSum?'区间合计':'区间平均'}·${esc(field.label)}${field.unit?`(${esc(field.unit)})`:''}</div></div><div class="kpi-card"><div class="num">${totalSessions}</div><div class="lbl">场次数</div></div>`;
   const roomName=chartRoom==='all'?'全部直播间':((rooms[chartRoom]||{}).name||chartRoom);
-  const dimTxt=chartSlot==='__by'?'班别对比':(chartSlot?`仅${chartSlot}班`:'全部班');
-  $('chart-note').textContent=`${roomName} · ${chartFrom||fmtD(from)}〜${chartTo||fmtD(to)} · ${chartSlot==='__by'?'按班':CHART_GRAN_LABEL[chartPeriod]} · ${isSum?'合计':'平均'} · ${dimTxt}`;
-  drawChart(labels,data,field,isSum||chartSlot==='__by');
+  const dimTxt=chartBreak?CHART_BREAK_LABEL[chartBreak]+'对比':(chartSlot==='__by'?'班别对比':(chartSlot?`仅${chartSlot}班`:'全部班'));
+  const granTxt=chartBreak?CHART_BREAK_LABEL[chartBreak]:(chartSlot==='__by'?'按班':CHART_GRAN_LABEL[chartPeriod]);
+  $('chart-note').textContent=`${roomName} · ${chartFrom||fmtD(from)}〜${chartTo||fmtD(to)} · ${granTxt} · ${isSum?'合计':'平均'} · ${dimTxt}`;
+  drawChart(labels,data,field,isSum||chartSlot==='__by'||!!chartBreak);
   const sb={};recs.forEach(r=>{const k=r.slot!=null?r.slot:'未指定';(sb[k]=sb[k]||{s:0,c:0});sb[k].s+=r.v;sb[k].c++;});
   const slotBreakdown=Object.keys(sb).sort((a,b)=>a==='未指定'?1:b==='未指定'?-1:a-b).map(k=>({slot:k,total:sb[k].s,avg:sb[k].c?sb[k].s/sb[k].c:0,cnt:sb[k].c}));
-  window.__chartCtx={roomName,metricLabel:field.label,unit:field.unit,isSum,rangeTxt:`${chartFrom||fmtD(from)}〜${chartTo||fmtD(to)}`,granLabel:chartSlot==='__by'?'按班':CHART_GRAN_LABEL[chartPeriod],timeSeries:labels.map((l,i)=>({label:l,val:data[i],cnt:cnt[i]})),slotBreakdown};
+  window.__chartCtx={roomName,metricLabel:field.label,unit:field.unit,isSum,rangeTxt:`${chartFrom||fmtD(from)}〜${chartTo||fmtD(to)}`,granLabel:granTxt,isTimeSeries:!(chartBreak||chartSlot==='__by'),timeSeries:labels.map((l,i)=>({label:l,val:data[i],cnt:cnt[i]})),slotBreakdown};
   if(aiAuto)scheduleAutoAi();
 }
 function drawChart(labels,data,field,asBar){
@@ -546,7 +568,7 @@ function buildLocalAnalysis(c){
   const overall=c.isSum?total:(vals.length?total/vals.length:0);
   out.push(`- ${c.isSum?'区间合计':'区间平均'}：**${fmtLocalNum(overall)}${u}**（${sessions}场・データのある区间 ${active.length}）`);
   if(active.length){let pk=active[0];active.forEach(p=>{if(p.val>pk.val)pk=p;});out.push(`- ピークは **${pk.label}** の ${fmtLocalNum(pk.val)}${u}`);}
-  if(active.length>=2&&c.granLabel!=='按班'){
+  if(active.length>=2&&c.isTimeSeries!==false&&c.granLabel!=='按班'){
     const half=Math.max(1,Math.floor(active.length/2));
     const fA=active.slice(0,half).reduce((a,p)=>a+p.val,0)/half;
     const lA=active.slice(-half).reduce((a,p)=>a+p.val,0)/half;
@@ -1013,6 +1035,8 @@ const LIVE_FIELDS=[
   {key:'gmvPer1kViews',label:'千次观看成交金额',unit:'円'},
   {key:'avgWatchSec',label:'人均观看时长',unit:'秒'},
   {key:'newFollowers',label:'新增粉丝数',unit:''},
+  {key:'adSpend',label:'投流金额',unit:'円'},
+  {key:'roi',label:'ROI',unit:''},
 ];
 function normLabel(s){return String(s||'').replace(/[\s:：()（）\[\]]/g,'');}
 function parseNumUnit(s){
@@ -1089,6 +1113,7 @@ function initLiveData(){
   if(!$('ld-date').value)$('ld-date').value=`${now.getFullYear()}-${pad2(now.getMonth()+1)}-${pad2(now.getDate())}`;
   if(!$('ld-time').value)$('ld-time').value=`${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
   loadLdSlots(sel.value);
+  const xr=$('xi-room');if(xr){xr.innerHTML=sel.innerHTML;xr.value=sel.value;}
   if($('lw-auto'))$('lw-auto').checked=watchAuto;
   restoreWatchFolder();
   resetLdForm();
@@ -1272,6 +1297,7 @@ async function restoreWatchFolder(){
     const perm=await h.queryPermission({mode:'read'});
     if(perm==='granted'){watchHandle=h;startWatch();return;}
     watchHandle=h; // 記憶あり・権限だけ再取得が必要
+    const fb=$('xi-folder-btn');if(fb)fb.style.display='';
     const pk=$('lw-pick');if(pk){pk.textContent='▶ 监视を再开（'+h.name+'）';pk.onclick=resumeWatchFolder;}
     $('lw-status').textContent='前回のフォルダ「'+h.name+'」を記憶中。「监视を再开」を押して続行';
   }catch(e){}
@@ -1287,6 +1313,7 @@ async function resumeWatchFolder(){
 }
 function startWatch(){
   if(!watchHandle)return;
+  const fb=$('xi-folder-btn');if(fb)fb.style.display='';
   const pk=$('lw-pick'),sp=$('lw-stop');if(pk)pk.style.display='none';if(sp)sp.style.display='';
   const rn=(rooms[$('ld-room').value]||{}).name||$('ld-room').value||'';
   $('lw-status').textContent=`监视中：${watchHandle.name} → ${rn}`;
@@ -1334,6 +1361,169 @@ async function saveWatchedRecord(rid,y,m,d,parsed,timeStr,slot){
   await DB.set(`rooms/${rid}/liveStats/${y}/${m}/${d}/${key}`,rec);
   await logEvent(rid,{action:'edit',target:`直播数据(自动监视${watchAuto?'·全自动':''}) ${y}/${m}/${d}${rec.slot!=null?` ${rec.slot}班`:''}`,after:`GMV=${rec.gmv!=null?rec.gmv:'-'}`});
   return {y,m,d,key};
+}
+/* ===== Excel（kdocs直播数据表）导入 ===== */
+let _xlsxP=null,xiPending=null,xiMeta=null;
+function ensureXLSX(){
+  if(typeof XLSX!=='undefined')return Promise.resolve();
+  if(_xlsxP)return _xlsxP;
+  _xlsxP=new Promise((res,rej)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';s.onload=()=>res();s.onerror=()=>rej(new Error('SheetJS 加载失败（请检查网络）'));document.head.appendChild(s);});
+  return _xlsxP;
+}
+function xiHash(s){let h=5381;for(let i=0;i<s.length;i++)h=((h*33)^s.charCodeAt(i))>>>0;return h.toString(36);}
+/* /K 列：数値でも "63.64k" 文字列でも ×1000（列見出しが千単位のため） */
+function xiParseK(v){if(v==null||v==='')return null;if(typeof v==='number')return Math.round(v*1000);const m=String(v).replace(/,/g,'').match(/([\d.]+)\s*([kK万]?)/);if(!m)return null;const n=parseFloat(m[1]);if(isNaN(n))return null;if(m[2]==='万')return Math.round(n*10000);return Math.round(n*1000);}
+/* /円 列：プレーン数値はそのまま、"2.92k" は ×1000 */
+function xiParseYen(v){if(v==null||v==='')return null;if(typeof v==='number')return v;const s=String(v).replace(/,/g,'');const m=s.match(/([\d.]+)\s*([kK万]?)/);if(!m)return null;const n=parseFloat(m[1]);if(isNaN(n))return null;if(m[2]==='k'||m[2]==='K')return Math.round(n*1000);if(m[2]==='万')return Math.round(n*10000);return n;}
+/* 率列：小数 0.0912 → 9.12(%)。%付き文字列はそのまま数値化 */
+function xiParseRate(v){if(v==null||v==='')return null;if(typeof v==='number')return Math.round(v*10000)/100;const s=String(v).trim();const m=s.match(/([\d.]+)/);if(!m)return null;const n=parseFloat(m[1]);if(isNaN(n))return null;return s.includes('%')?n:Math.round(n*10000)/100;}
+function xiParseNum(v){if(v==null||v==='')return null;if(typeof v==='number')return v;const m=String(v).match(/-?[\d.]+/);return m?parseFloat(m[0]):null;}
+/* 主播の表記ゆれ吸収（HINA/Hina/hina→Hina 等。複合名はそのまま） */
+function xiNormHost(v){if(v==null)return '';let s=String(v).trim().replace(/\s+/g,' ');if(!s)return '';const map={hina:'Hina',kazu:'Kazu',sho:'Sho',daisy:'Daisy',kyo:'Kyo',xiang:'Xiang',xinxin:'Xinxin',lili:'Lili',ryo:'Ryo',roy:'Roy'};const low=s.toLowerCase();return map[low]||s;}
+function xiColIndex(hdr){
+  const idx={};
+  (hdr||[]).forEach((h,i)=>{
+    const n=normLabel(h).toLowerCase();if(!n)return;
+    if(n.includes('日期'))idx.date=i;
+    else if(n.includes('品类'))idx.category=i;
+    else if(n.includes('直播账号')||n==='账号')idx.account=i;
+    else if(n.includes('直播时长'))idx.duration=i;
+    else if(n.includes('曝光次数'))idx.exposure=i;
+    else if(n.includes('观看次数'))idx.views=i;
+    else if(n.includes('人均观看时长'))idx.avgWatchSec=i;
+    else if(n.includes('gmv'))idx.gmv=i;
+    else if(n.includes('投流金额'))idx.adSpend=i;
+    else if(n==='roi')idx.roi=i;
+    else if(n.includes('千次观看成交金额'))idx.gmvPer1kViews=i;
+    else if(n.includes('点击成交转化率'))idx.skuCvr=i;
+    else if(n.includes('商品点击次数'))idx.productClicks=i;
+    else if(n.includes('商品成交件数'))idx.orders=i;
+    else if(n.includes('主播'))idx.host=i;
+    else if(n==='点击率')idx.ctr=i;
+  });
+  return idx;
+}
+function xiBuild(wb){
+  const pend=[],accts={},cats={},hosts={},dayOcc={};let rows=0;
+  for(const sn of wb.SheetNames){
+    const ws=wb.Sheets[sn];if(!ws)continue;
+    const arr=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:null});
+    if(!arr.length)continue;
+    const ci=xiColIndex(arr[0]);
+    if(ci.category==null&&ci.account==null)continue;
+    let ly=null,lm=null,ld=null;
+    for(let i=1;i<arr.length;i++){
+      const r=arr[i];if(!r||r.every(x=>x==null))continue;
+      const catCell=ci.category!=null?r[ci.category]:null,acctCell=ci.account!=null?r[ci.account]:null;
+      if(catCell==null&&acctCell==null)continue;
+      const dv=ci.date!=null?r[ci.date]:null;
+      if(typeof dv==='number'&&typeof XLSX.SSF!=='undefined'){const dc=XLSX.SSF.parse_date_code(dv);if(dc&&dc.y){ly=dc.y;lm=dc.m;ld=dc.d;}}
+      else if(dv instanceof Date){ly=dv.getFullYear();lm=dv.getMonth()+1;ld=dv.getDate();}
+      else if(typeof dv==='string'&&dv.trim()){const mm=dv.match(/(\d{4})\D+(\d{1,2})\D+(\d{1,2})/);if(mm){ly=+mm[1];lm=+mm[2];ld=+mm[3];}else{const m2=dv.match(/(\d{1,2})\D+(\d{1,2})/);if(m2){lm=+m2[1];ld=+m2[2];ly=ly||new Date().getFullYear();}}}
+      if(ly==null||lm==null||ld==null)continue;
+      const account=acctCell!=null?String(acctCell).trim():'';
+      const category=catCell!=null?String(catCell).trim():'';
+      const host=xiNormHost(ci.host!=null?r[ci.host]:'');
+      const rec={source:'xls-import',ts:new Date(ly,lm-1,ld,0,0).getTime()};
+      if(account)rec.account=account;
+      if(category)rec.category=category;
+      if(host)rec.host=host;
+      const dur=ci.duration!=null?r[ci.duration]:null;if(dur!=null&&String(dur).trim())rec.durationText=String(dur).trim();
+      const set=(k,val)=>{if(val!=null&&!isNaN(val))rec[k]=val;};
+      set('exposure',xiParseK(r[ci.exposure]));
+      set('views',xiParseK(r[ci.views]));
+      set('ctr',xiParseRate(r[ci.ctr]));
+      set('avgWatchSec',xiParseNum(r[ci.avgWatchSec]));
+      set('gmv',xiParseYen(r[ci.gmv]));
+      set('adSpend',xiParseYen(r[ci.adSpend]));
+      set('roi',xiParseNum(r[ci.roi]));
+      set('gmvPer1kViews',xiParseYen(r[ci.gmvPer1kViews]));
+      set('skuCvr',xiParseRate(r[ci.skuCvr]));
+      set('productClicks',xiParseNum(r[ci.productClicks]));
+      set('orders',xiParseNum(r[ci.orders]));
+      const hasMetric=['exposure','views','ctr','gmv','adSpend','roi','productClicks','orders','gmvPer1kViews','skuCvr','avgWatchSec'].some(k=>rec[k]!=null);
+      if(!hasMetric&&!account&&!category)continue;
+      const trip=account+'|'+category+'|'+host;
+      const occK=ly+'-'+lm+'-'+ld+'#'+trip;dayOcc[occK]=(dayOcc[occK]||0)+1;
+      const key='xls_'+xiHash(trip+'|'+dayOcc[occK]);
+      pend.push({y:ly,m:lm,d:ld,key,rec});rows++;
+      if(account)accts[account]=(accts[account]||0)+1;
+      if(category)cats[category]=(cats[category]||0)+1;
+      if(host)hosts[host]=(hosts[host]||0)+1;
+    }
+  }
+  xiPending=pend;xiMeta={rows,accts,cats,hosts,sheets:wb.SheetNames};
+}
+function xiRenderPreview(){
+  const box=$('xi-preview');if(!box)return;
+  if(!xiPending||!xiPending.length){box.innerHTML='<span class="muted">未解析到有效数据行（请确认是「Tiktok每日直播数据表」格式的 .xlsx）。</span>';return;}
+  const m=xiMeta;
+  const fmtDist=o=>Object.entries(o).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${esc(k)}<span class="muted">(${v})</span>`).join('　')||'-';
+  let minTs=Infinity,maxTs=-Infinity;xiPending.forEach(p=>{if(p.rec.ts<minTs)minTs=p.rec.ts;if(p.rec.ts>maxTs)maxTs=p.rec.ts;});
+  const dstr=t=>{const d=new Date(t);return `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`;};
+  const rid=$('xi-room').value;const rn=(rooms[rid]||{}).name||rid||'(未选择)';
+  const cell=v=>`<td style="text-align:right;padding:2px 6px;">${v==null?'-':(typeof v==='number'?v.toLocaleString():esc(v))}</td>`;
+  const sample=xiPending.slice(0,8).map(p=>{const r=p.rec;return `<tr><td style="padding:2px 6px;">${p.y}/${p.m}/${p.d}</td><td style="padding:2px 6px;">${esc(r.account||'')}</td><td style="padding:2px 6px;">${esc(r.category||'')}</td><td style="padding:2px 6px;">${esc(r.host||'')}</td>${cell(r.gmv)}${cell(r.adSpend)}${cell(r.roi)}${cell(r.exposure)}${cell(r.views)}</tr>`;}).join('');
+  box.innerHTML=`<div style="border:1px solid var(--line);border-radius:8px;padding:10px;background:#0b0d11;">
+    <div style="font-size:13px;margin-bottom:6px;">解析成功：<b>${m.rows}</b> 条记录 · 月表 ${m.sheets.length} 个 · 期间 ${dstr(minTs)}〜${dstr(maxTs)}</div>
+    <div style="font-size:12px;line-height:1.9;">
+      <div><b>品类</b>：${fmtDist(m.cats)}</div>
+      <div><b>账号</b>：${fmtDist(m.accts)}</div>
+      <div><b>主播</b>：${fmtDist(m.hosts)}</div>
+    </div>
+    <div style="overflow-x:auto;margin-top:8px;"><table style="font-size:11px;border-collapse:collapse;white-space:nowrap;color:var(--ink);">
+      <thead><tr style="color:var(--dim);text-align:left;"><th style="padding:2px 6px;">日期</th><th style="padding:2px 6px;">账号</th><th style="padding:2px 6px;">品类</th><th style="padding:2px 6px;">主播</th><th style="padding:2px 6px;text-align:right;">GMV</th><th style="padding:2px 6px;text-align:right;">投流</th><th style="padding:2px 6px;text-align:right;">ROI</th><th style="padding:2px 6px;text-align:right;">曝光</th><th style="padding:2px 6px;text-align:right;">观看</th></tr></thead>
+      <tbody>${sample}</tbody></table></div>
+    <div class="muted" style="font-size:11px;margin-top:4px;">先頭8件のプレビュー。曝光/观看は×1000済み。同一 日期·账号·品类·主播 は既存を上書きします。</div>
+    <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <button class="btn-s b-blue" onclick="commitXlsxImport()">✅ 确认导入 ${m.rows} 条 → ${esc(rn)}</button>
+      <button class="btn-s b-gray" onclick="xiPending=null;xiMeta=null;$('xi-preview').innerHTML='';$('xi-status').textContent='已取消';">取消</button>
+    </div></div>`;
+}
+async function importXlsxFile(file){
+  if(!file)return;
+  try{
+    $('xi-preview').innerHTML='';$('xi-status').textContent='正在加载解析库…';
+    await ensureXLSX();
+    $('xi-status').textContent=`正在读取 ${file.name}（${(file.size/1048576).toFixed(0)}MB）…`;
+    const buf=await file.arrayBuffer();
+    $('xi-status').textContent='正在解析…（大文件需十几秒，请稍候）';
+    await new Promise(r=>setTimeout(r,30));
+    const wb=XLSX.read(new Uint8Array(buf),{type:'array',dense:true});
+    xiBuild(wb);
+    $('xi-status').textContent=`解析完成：${xiMeta.rows} 条，请核对后导入`;
+    xiRenderPreview();
+  }catch(e){$('xi-status').textContent='解析失败：'+(e&&e.message||e);}
+}
+async function importXlsxFromFolder(){
+  if(!watchHandle){alert('尚未选择监视文件夹（请先在上方「自动监视文件夹」选择）');return;}
+  try{
+    $('xi-status').textContent='正在查找 .xlsx…';
+    const perm=await watchHandle.queryPermission({mode:'read'});
+    if(perm!=='granted'){const rq=await watchHandle.requestPermission({mode:'read'});if(rq!=='granted'){$('xi-status').textContent='没有文件夹读取权限';return;}}
+    let target=null;
+    for await(const [name,h] of watchHandle.entries()){
+      if(h.kind==='file'&&/\.xlsx$/i.test(name)){if(/直播数据|tiktok/i.test(name)){target=h;break;}if(!target)target=h;}
+    }
+    if(!target){$('xi-status').textContent='文件夹内未找到 .xlsx 文件';return;}
+    const file=await target.getFile();
+    await importXlsxFile(file);
+  }catch(e){$('xi-status').textContent='读取失败：'+(e&&e.message||e);}
+}
+async function commitXlsxImport(){
+  if(!xiPending||!xiPending.length){alert('没有可导入的数据');return;}
+  const rid=$('xi-room').value;if(!rid){alert('请选择导入到哪个直播间');return;}
+  const total=xiPending.length;let done=0;
+  $('xi-status').textContent='导入中…';
+  for(const p of xiPending){
+    try{await DB.set(`rooms/${rid}/liveStats/${p.y}/${p.m}/${p.d}/${p.key}`,p.rec);}catch(e){}
+    done++;
+    if(done%20===0||done===total)$('xi-status').textContent=`导入中… ${done}/${total}`;
+  }
+  await logEvent(rid,{action:'edit',target:`直播数据(Excel导入) ${total}条`,after:`${xiMeta.sheets.length}个月表 · ${Object.keys(xiMeta.accts).length}账号`});
+  $('xi-status').textContent=`✅ 已导入 ${total} 条到「${(rooms[rid]||{}).name||rid}」`;
+  $('xi-preview').innerHTML='';xiPending=null;xiMeta=null;
+  loadLdSessions();
 }
 function manualAddImages(fileList){
   const files=[...(fileList||[])].filter(f=>f&&f.type&&f.type.startsWith('image/'));
