@@ -1520,15 +1520,19 @@ async function importXlsxFromFolder(){
 async function commitXlsxImport(){
   if(!xiPending||!xiPending.length){alert('没有可导入的数据');return;}
   const rid=$('xi-room').value;if(!rid){alert('请选择导入到哪个直播间');return;}
-  const total=xiPending.length;let done=0;
+  const total=xiPending.length;let done=0,kept=0;
+  $('xi-status').textContent='读取现有记录（保留手动班次）…';
+  let existing={};try{existing=await DB.get(`rooms/${rid}/liveStats`)||{};}catch(e){}
   $('xi-status').textContent='导入中…';
   for(const p of xiPending){
+    const ex=existing&&existing[p.y]&&existing[p.y][p.m]&&existing[p.y][p.m][p.d]&&existing[p.y][p.m][p.d][p.key];
+    if(ex&&ex.slot!=null){p.rec.slot=ex.slot;kept++;}
     try{await DB.set(`rooms/${rid}/liveStats/${p.y}/${p.m}/${p.d}/${p.key}`,p.rec);}catch(e){}
     done++;
     if(done%20===0||done===total)$('xi-status').textContent=`导入中… ${done}/${total}`;
   }
-  await logEvent(rid,{action:'edit',target:`直播数据(Excel导入) ${total}条`,after:`${xiMeta.sheets.length}个月表 · ${Object.keys(xiMeta.accts).length}账号`});
-  $('xi-status').textContent=`✅ 已导入 ${total} 条到「${(rooms[rid]||{}).name||rid}」`;
+  await logEvent(rid,{action:'edit',target:`直播数据(Excel导入) ${total}条`,after:`${xiMeta.sheets.length}个月表 · ${Object.keys(xiMeta.accts).length}账号 · 保留班次${kept}条`});
+  $('xi-status').textContent=`✅ 已导入 ${total} 条到「${(rooms[rid]||{}).name||rid}」（保留手动班次 ${kept} 条）`;
   $('xi-preview').innerHTML='';xiPending=null;xiMeta=null;
   loadLdSessions();
 }
@@ -1664,9 +1668,23 @@ async function saveLdSession(){
   resetLdForm();loadLdSessions();
   alert('已保存');
 }
+function slotSelectFor(rid,slot){
+  let opts=slotOptsCache[rid]||'<option value="">未指定班次</option>';
+  const target=slot!=null?`value="${slot}"`:'value=""';
+  return opts.replace(target,target+' selected');
+}
+async function setSessionSlot(rid,y,m,day,key,val){
+  const path=`rooms/${rid}/liveStats/${y}/${m}/${day}/${key}`;
+  const rec=await DB.get(path);if(!rec)return;
+  if(val===''||val==null)delete rec.slot;else rec.slot=parseInt(val,10);
+  await DB.set(path,rec);
+  await logEvent(rid,{action:'edit',target:`直播数据班次 ${y}/${m}/${day}`,after:`班=${val!==''&&val!=null?val+'班':'未指定'}`});
+  loadLdSessions();
+}
 async function loadLdSessions(){
   const rid=$('ld-room').value;const box=$('ld-sess-list');if(!rid){box.innerHTML='';return;}
   box.innerHTML='<p class="muted">加载中…</p>';
+  await ensureSlotOpts(rid);
   const dateStr=$('ld-date').value||'';const [y,m]=dateStr?dateStr.split('-').map(x=>parseInt(x,10)):[new Date().getFullYear(),new Date().getMonth()+1];
   const md=await DB.get(`rooms/${rid}/liveStats/${y}/${m}`);
   const rows=[];
@@ -1677,10 +1695,12 @@ async function loadLdSessions(){
     const dt=r.ts?new Date(r.ts):null;
     const dtStr=dt?`${dt.getMonth()+1}/${dt.getDate()} ${pad2(dt.getHours())}:${pad2(dt.getMinutes())}`:`${r.m}/${r.day}`;
     const detail=LIVE_FIELDS.map(f=>r[f.key]!=null?`<span><b>${esc(f.label)}</b>：${r[f.key]}${f.unit}</span>`:'').filter(Boolean).join('');
+    const ctx=[r.category,r.host,r.account].filter(Boolean).map(esc).join(' / ');
     return `<div class="ld-sess" id="ld-sess-${r.key}">
       <div class="ld-sess-top" onclick="document.getElementById('ld-sess-${r.key}').classList.toggle('open')">
-        <span>${dtStr}${r.slot!=null?` <b style="color:var(--accent)">${r.slot}班</b>`:''}${r.merged>1?` <span class="muted">(合算${r.merged}场)</span>`:''}</span><b>GMV ${r.gmv!=null?r.gmv:'-'}円</b><span class="muted">成交${r.orders!=null?r.orders:'-'}件 · 观看${r.viewersNow!=null?r.viewersNow:'-'}人 · 新增粉丝${r.newFollowers!=null?r.newFollowers:'-'}</span>
+        <span>${dtStr}${r.slot!=null?` <b style="color:var(--accent)">${r.slot}班</b>`:''}${r.merged>1?` <span class="muted">(合算${r.merged}场)</span>`:''}${ctx?` <span class="muted" style="font-size:11px;">${ctx}</span>`:''}</span><b>GMV ${r.gmv!=null?r.gmv:'-'}円</b><span class="muted">成交${r.orders!=null?r.orders:'-'}件 · 观看${r.viewersNow!=null?r.viewersNow:'-'}人 · 新增粉丝${r.newFollowers!=null?r.newFollowers:'-'}</span>
         <span class="sp" style="flex:1"></span>
+        <select title="班次" style="padding:3px 4px;border-radius:6px;background:#0b0d11;border:1px solid var(--line);color:var(--ink);font-size:12px;" onclick="event.stopPropagation()" onchange="event.stopPropagation();setSessionSlot('${esc(r.rid)}',${r.y},${r.m},${r.day},'${esc(r.key)}',this.value)">${slotSelectFor(r.rid,r.slot)}</select>
         <button class="btn-s b-gray" onclick="event.stopPropagation();editLdSession('${esc(r.rid)}',${r.y},${r.m},${r.day},'${esc(r.key)}')">编辑</button>
         <button class="btn-s b-red" onclick="event.stopPropagation();deleteLdSession('${esc(r.rid)}',${r.y},${r.m},${r.day},'${esc(r.key)}')">删除</button>
       </div>
