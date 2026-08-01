@@ -280,6 +280,7 @@ td.mono{font-family:var(--mono);color:var(--dim);word-break:break-all;}
             <input type="file" id="xi-file" accept=".xlsx" style="display:none;" onchange="importXlsxFile(this.files[0]);this.value=''">
             <span class="muted" id="xi-status"></span>
           </div>
+          <div id="xi-update" style="margin-top:8px;"></div>
           <p class="muted" style="font-size:11px;margin-top:5px;line-height:1.6;">kdocs（金山文档）の「Tiktok东京每日直播数据表.xlsx」を読み込み、月別シート全部から各行を直播数据に取り込みます（<b>OCRではなく手入力の正確な数字</b>）。<b>账号・品类・主播</b>もレコードに保存し、下の「数据图表」で分组分析できます。日期の結合セルは自動で繰り下げ、`63.64k`/小数の点击率なども自動変換。同じ日・账号・品类・主播は<b>再取込で上書き</b>（重複しません）。読み込み後にプレビューで内容を確認してから「确认导入」してください。135MBファイルは解析に十数秒かかります。</p>
           <div id="xi-preview" style="margin-top:8px;"></div>
         </div>
@@ -1116,6 +1117,7 @@ function initLiveData(){
   const xr=$('xi-room');if(xr){xr.innerHTML=sel.innerHTML;xr.value=sel.value;}
   if($('lw-auto'))$('lw-auto').checked=watchAuto;
   restoreWatchFolder();
+  checkXlsxUpdate();
   resetLdForm();
   loadLdSessions();
 }
@@ -1319,6 +1321,7 @@ function startWatch(){
   $('lw-status').textContent=`监视中：${watchHandle.name} → ${rn}`;
   if(watchTimer)clearInterval(watchTimer);
   pollWatchFolder();watchTimer=setInterval(pollWatchFolder,6000);
+  checkXlsxUpdate();
 }
 function stopWatch(){if(watchTimer)clearInterval(watchTimer);watchTimer=null;const pk=$('lw-pick'),sp=$('lw-stop');if(pk)pk.style.display='';if(sp)sp.style.display='none';$('lw-status').textContent='已停止监视';if($('lw-files'))$('lw-files').innerHTML='';}
 async function pollWatchFolder(){
@@ -1363,7 +1366,28 @@ async function saveWatchedRecord(rid,y,m,d,parsed,timeStr,slot){
   return {y,m,d,key};
 }
 /* ===== Excel（kdocs直播数据表）导入 ===== */
-let _xlsxP=null,xiPending=null,xiMeta=null;
+let _xlsxP=null,xiPending=null,xiMeta=null,xiFileMeta=null;
+/* 監視フォルダ内の xlsx が前回取込より新しければ「🆕更新あり」ボタンを出す（重い解析はせず更新日時だけ確認） */
+async function checkXlsxUpdate(){
+  const box=$('xi-update');if(!box)return;box.innerHTML='';
+  if(!watchHandle)return;
+  try{
+    if((await watchHandle.queryPermission({mode:'read'}))!=='granted')return;
+    let target=null;
+    for await(const [name,h] of watchHandle.entries()){
+      if(h.kind==='file'&&/\.xlsx$/i.test(name)){if(/直播数据|tiktok/i.test(name)){target=h;break;}if(!target)target=h;}
+    }
+    if(!target)return;
+    const file=await target.getFile();
+    let last=null;try{last=JSON.parse(localStorage.getItem('pantera_xls_last_import')||'null');}catch(e){}
+    const isNew=!last||!last.mtime||file.name!==last.name||file.lastModified>last.mtime;
+    if(!isNew)return;
+    const d=new Date(file.lastModified);
+    const dstr=`${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    const info=last&&last.importedAt?`前回取込 ${new Date(last.importedAt).toLocaleString()}（${last.count||'?'}件）`:'まだ一度も取り込んでいません';
+    box.innerHTML=`<div style="background:#15241f;border:1px solid #7fd1b9;border-radius:8px;padding:9px 12px;font-size:13px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">🆕 <b>Excelが更新されています</b>（ファイル更新：${dstr}）<button class="btn-s b-blue" onclick="importXlsxFromFolder()">→ 今すぐ取り込む</button><span class="muted" style="font-size:11px;">${esc(info)}</span></div>`;
+  }catch(e){}
+}
 function ensureXLSX(){
   if(typeof XLSX!=='undefined')return Promise.resolve();
   if(_xlsxP)return _xlsxP;
@@ -1489,6 +1513,7 @@ function xiRenderPreview(){
 }
 async function importXlsxFile(file){
   if(!file)return;
+  xiFileMeta={name:file.name,mtime:file.lastModified||Date.now()};
   try{
     $('xi-preview').innerHTML='';$('xi-status').textContent='正在加载解析库…';
     await ensureXLSX();
@@ -1533,7 +1558,9 @@ async function commitXlsxImport(){
   }
   await logEvent(rid,{action:'edit',target:`直播数据(Excel导入) ${total}条`,after:`${xiMeta.sheets.length}个月表 · ${Object.keys(xiMeta.accts).length}账号 · 保留班次${kept}条`});
   $('xi-status').textContent=`✅ 已导入 ${total} 条到「${(rooms[rid]||{}).name||rid}」（保留手动班次 ${kept} 条）`;
+  try{localStorage.setItem('pantera_xls_last_import',JSON.stringify({name:xiFileMeta&&xiFileMeta.name,mtime:xiFileMeta&&xiFileMeta.mtime,importedAt:Date.now(),count:total,rid}));}catch(e){}
   $('xi-preview').innerHTML='';xiPending=null;xiMeta=null;
+  checkXlsxUpdate();
   loadLdSessions();
 }
 function manualAddImages(fileList){
