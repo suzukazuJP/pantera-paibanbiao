@@ -264,6 +264,21 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
   <div class="row" style="margin-top:14px;"><button class="btn ghost" onclick="closeModal('modal-lockrange')">取消</button><button class="btn ghost" onclick="doLockRange(false)">🔓 解锁</button><button class="btn" onclick="doLockRange(true)">🔒 固定</button></div>
 </div></div>
 
+<div class="overlay" id="modal-colorrange" style="z-index:90;"><div class="modal">
+  <h2>🎨 按期间设色</h2>
+  <p class="muted" style="font-size:12px;margin-bottom:10px;color:var(--text-dim);">指定本月（<span id="cr-month"></span>）的日期范围，对范围内每天的全部班次统一设定颜色（覆盖自动配色）。选「自动（清除）」＝取消手动颜色，恢复按人数自动配色。</p>
+  <div class="field"><label>开始日</label><input id="cr-from" type="number" min="1" max="31" placeholder="例：1"></div>
+  <div class="field" style="margin-top:8px;"><label>结束日</label><input id="cr-to" type="number" min="1" max="31" placeholder="例：10"></div>
+  <div class="row" style="margin-top:14px;flex-wrap:wrap;gap:6px;justify-content:flex-start;">
+    <button class="sb-btn" onclick="doColorRange('green')"><span class="sw" style="background:var(--green)"></span>已齐</button>
+    <button class="sb-btn" onclick="doColorRange('blue')"><span class="sw" style="background:var(--blue)"></span>需协调</button>
+    <button class="sb-btn" onclick="doColorRange('yellow')"><span class="sw" style="background:var(--yellow)"></span>缺一方</button>
+    <button class="sb-btn" onclick="doColorRange('red')"><span class="sw" style="background:var(--red)"></span>无人</button>
+    <button class="sb-btn" onclick="doColorRange('')">自动（清除）</button>
+  </div>
+  <div class="row" style="margin-top:12px;"><button class="btn ghost" onclick="closeModal('modal-colorrange')">取消</button></div>
+</div></div>
+
 <div class="overlay" id="modal-delreason" style="z-index:90;"><div class="modal">
   <h2 id="delr-title">删除班次</h2>
   <p class="muted" style="font-size:12px;margin-bottom:8px;color:var(--text-dim);">填写理由后会通知该员工（可留空）。</p>
@@ -829,6 +844,7 @@ function renderDetail(){
     const b1=document.createElement('button');b1.className='btn small ghost';b1.textContent=dayLocked?'📌 解除这天全部固定':'📌 固定这一整天';
     b1.onclick=async()=>{if(!confirm(dayLocked?`解除 ${viewMonth}/${day} 全部固定？`:`固定 ${viewMonth}/${day} 整天（全部班次·全部格）？`))return;await lockDay(day,!dayLocked);logEvent(currentRoomId,{action:'edit',target:`${viewMonth}/${day} 整天${dayLocked?'解锁':'固定'}`});renderDetail();renderCalendar();};bar.appendChild(b1);
     const b2=document.createElement('button');b2.className='btn small ghost';b2.textContent='📅 按期间固定';b2.onclick=()=>openLockRange();bar.appendChild(b2);
+    const b3=document.createElement('button');b3.className='btn small ghost';b3.textContent='🎨 按期间设色';b3.onclick=()=>openColorRange();bar.appendChild(b3);
   }
   const days=new Date(viewYear,viewMonth,0).getDate();const ids=slotList();const slotIdx=ids.findIndex(x=>x[0]===slotId);
   const mkNav=(t,fn,dis,big)=>{const b=document.createElement('button');b.className='btn small ghost';b.textContent=t;b.style.cssText=`padding:4px ${big?9:7}px;font-size:${big?18:11}px;line-height:1;`+(dis?'opacity:.25;pointer-events:none;':'');if(!dis)b.onclick=fn;return b;};
@@ -876,6 +892,16 @@ async function doLockRange(lock){
   for(let d=f;d<=t;d++)await lockDay(d,lock);
   logEvent(currentRoomId,{action:'edit',target:`${viewMonth}/${f}-${t} 期间${lock?'固定':'解锁'}`});
   closeModal('modal-lockrange');renderCalendar();if(detailCtx)renderDetail();
+}
+function openColorRange(){$('cr-month').textContent=`${viewYear}年${viewMonth}月`;$('cr-from').value='';$('cr-to').value='';openModal('modal-colorrange');}
+async function doColorRange(status){
+  const f=parseInt($('cr-from').value,10),t=parseInt($('cr-to').value,10);
+  if(!f||!t||f<1||t<1||f>t){showBanner('请输入正确的日期范围（开始 ≤ 结束）');return;}
+  const lb=status?STATUS_LABEL[status]:'自动（清除）';
+  if(!confirm(`${viewMonth}月 ${f}日〜${t}日 全部班次设为「${lb}」？`))return;
+  for(let d=f;d<=t;d++){for(const[slotId]of slotList()){const path=`${monthPath()}/${d}/${slotId}/_status`;if(status)await DB.set(path,status);else await DB.remove(path);}}
+  logEvent(currentRoomId,{action:'edit',target:`${viewMonth}/${f}-${t} 期间设色=${lb}`});
+  closeModal('modal-colorrange');renderCalendar();if(detailCtx)renderDetail();
 }
 let delCtx=null;
 let changeCtx=null;
