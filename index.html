@@ -88,8 +88,6 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
 .day-lock{font-size:10px;line-height:1;}
 .ban-row .ban-div{flex:0 0 1.5px;width:1.5px;align-self:stretch;background:rgba(0,0,0,.3);border-radius:0;}
 .ban-row .memoflag{position:absolute;top:50%;right:-5px;transform:translateY(-50%);width:5px;height:5px;border-radius:50%;background:#c0392b;pointer-events:none;z-index:2;}
-#fab-myshift{position:fixed;right:14px;bottom:18px;z-index:20;border:none;border-radius:24px;padding:12px 20px;background:var(--ink);color:#fff;font-size:15px;font-weight:700;font-family:inherit;box-shadow:0 5px 16px rgba(0,0,0,.3),0 2px 0 #000;cursor:pointer;}
-#fab-myshift:active{transform:translateY(2px);filter:brightness(.8);}
 .sheet{position:fixed;left:0;right:0;bottom:0;z-index:60;width:100%;max-width:100vw;max-height:88vh;background:var(--bg);border-radius:18px 18px 0 0;border-top:1px solid var(--line);box-shadow:0 -8px 40px rgba(0,0,0,.25);transform:translateY(105%);transition:transform .2s var(--ease);display:flex;flex-direction:column;overflow-x:hidden;box-sizing:border-box;}
 .sheet *{max-width:100%;box-sizing:border-box;}
 .sheet.open{transform:none;transition-duration:.25s;}
@@ -297,6 +295,7 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
 <div id="screen-calendar" class="screen show">
   <div id="cal-header">
     <span class="uname" id="cal-uname"></span>
+    <button class="btn small" id="fab-myshift" style="display:none" onclick="openMyShift()">我的班表</button>
     <button class="btn small ghost" id="btn-manual" onclick="openManual()">📖 说明</button>
     <button class="btn small" id="btn-register" onclick="openModal('modal-register')">注册</button>
     <button class="btn small ghost" id="btn-login" onclick="handleLoginClick()">登录</button>
@@ -322,7 +321,6 @@ input,textarea{font-family:inherit;user-select:text;-webkit-user-select:text;}
   </div>
   <div id="weekday-row"><div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div></div>
   <div id="cal-grid"></div>
-  <button id="fab-myshift" onclick="openMyShift()">我的班表</button>
   <button id="fab-req" onclick="openMyPendingReq()" style="display:none;position:fixed;right:14px;bottom:74px;z-index:21;border:none;border-radius:24px;padding:11px 18px;background:var(--red);color:#fff;font-size:14px;font-weight:700;font-family:inherit;box-shadow:0 5px 16px rgba(0,0,0,.3);cursor:pointer;">🔔 承認待ち <span id="req-badge"></span></button>
 </div>
 
